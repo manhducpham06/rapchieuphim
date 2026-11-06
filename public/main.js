@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { buildWorld } from './world.js';
+import { buildArcade } from './arcade.js';
+import { createShop } from './shop.js';
+import { createGames } from './games.js';
+import { createTouch, isTouchDevice } from './touch.js';
 import { EMOTE_META, ICONS, icon, injectSprite } from './icons.js';
 import { createAvatar, makeLabel, makeBubble, makeEmote, disposeSprite, LOOK_DEFS, HIP_Y, hex } from './avatar.js';
 
@@ -12,19 +16,25 @@ const store = {
 };
 
 const EMOTE_LIST = EMOTE_META;
+const TOUCH = isTouchDevice();
+let RL = L.layoutOf('theater'); // bố cục của phòng hiện tại
+let curRoom = L.ROOM_BY_ID.std;
+let roomCounts = {};
+let passes = new Map(); // roomId -> exp (ms, 0 = vĩnh viễn)
 injectSprite();
 
 // ====================== Three.js ======================
 const canvas = $('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setClearColor(0x000000, 0);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, TOUCH ? 1.5 : 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 80);
-const world = buildWorld(scene);
+let world = buildWorld(scene, 'std');
+let worldKey = 'std';
 
 // Lớp CSS3D chứa video YouTube, nằm phía sau canvas WebGL (nhìn xuyên qua "lỗ" trên màn hình)
 const css = new CSS3DRenderer({ element: $('css3d') });
@@ -46,6 +56,19 @@ const css3dObj = new CSS3DObject(screenEl);
 css3dObj.position.set(L.SCREEN.x, L.SCREEN.y, L.SCREEN.z);
 css3dObj.scale.setScalar(L.SCREEN.w / SCR_PX.w);
 cssScene.add(css3dObj);
+
+function buildRoomWorld(def) {
+  const key = def.kind === 'arcade' ? 'arcade' : def.id;
+  RL = L.layoutOf(def.kind);
+  curRoom = def;
+  if (key !== worldKey) {
+    world.dispose();
+    world = def.kind === 'arcade' ? buildArcade(scene) : buildWorld(scene, def.id);
+    worldKey = key;
+  }
+  css.domElement.style.display = def.kind === 'arcade' ? 'none' : '';
+  $('roomName').textContent = def.name;
+}
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -115,6 +138,7 @@ buildPickers();
 // ====================== Trạng thái game ======================
 const me = { id: null, x: L.SPAWN.x, z: L.SPAWN.z, ry: Math.PI, seat: null, speed: 0, name: '' };
 const peers = new Map(); // id -> peer
+window.__me = me; // chỉ để kiểm thử
 const seatOwner = new Map(); // seatIndex -> id
 let joined = false;
 let clockOffset = 0; // serverTime - Date.now()
@@ -136,7 +160,7 @@ function makePeer(p, isMe = false) {
     id: p.id, name: p.name, look: p.look, av, label, bubble: null, bubbleUntil: 0, emote: null, floats: [],
     x: p.x, z: p.z, ry: p.ry, tx: p.x, tz: p.z, try_: p.ry, seat: p.seat ?? null, speed: 0, isMe,
   };
-  av.group.position.set(p.x, L.heightAt(p.z), p.z);
+  av.group.position.set(p.x, RL.heightAt(p.z), p.z);
   av.group.rotation.y = p.ry;
   return peer;
 }
@@ -160,7 +184,7 @@ function connect() {
   ws = new WebSocket(`${proto}://${location.host}`);
   const mine = ws;
   mine.onopen = () => {
-    send({ t: 'join', name: me.name, look });
+    send({ t: 'join', name: me.name, look, room: curRoom.id, tokens: shop.tokens() });
     send({ t: 'ping', t0: Date.now() });
   };
   mine.onmessage = (e) => {
@@ -208,6 +232,13 @@ function onMessage(m) {
     case 'welcome': {
       clockOffset = m.serverTime - Date.now();
       clearPeers();
+      const def = L.ROOM_BY_ID[m.room] || L.ROOM_BY_ID.std;
+      const changed = joined && def.id !== curRoom.id;
+      buildRoomWorld(def);
+      if (m.passes) setPasses(m.passes);
+      if (m.counts) { roomCounts = m.counts; }
+      games.close(true);
+      interactId = null;
       me.id = m.id;
       for (const p of m.players) {
         const peer = makePeer(p, p.id === m.id);
@@ -219,7 +250,12 @@ function onMessage(m) {
       camSnap();
       $('chatLog').innerHTML = '';
       m.chat.forEach((c) => addChat(c.name, c.text, c.id === me.id, true));
-      addSys('Chào mừng bạn đến rạp chiếu phim! Bấm vào một ghế trống để ngồi xem.');
+      addSys(def.kind === 'arcade'
+        ? 'Chào mừng đến Khu Giải Trí! Chạy vào quả bóng để sút, lại gần máy game và bấm E / nút Chơi.'
+        : changed ? `Bạn vừa vào ${def.name}. Bấm vào ghế trống để ngồi xem.` : 'Chào mừng bạn đến rạp chiếu phim! Bấm vào một ghế trống để ngồi xem.');
+      if (m.ball && world.setBall) { world.setBall(m.ball.b, false); world.setScores(m.ball.top); }
+      if (TOUCH) touch.show(true);
+      renderRooms();
       setNet('ok', 'trực tuyến');
       joined = true;
       $('join').hidden = true;
@@ -228,6 +264,8 @@ function onMessage(m) {
       applyQueue(m.queue);
       applyVideo(m.video);
       updateSeatChip();
+      updateInteract(true);
+      if (changed) closePanel();
       return;
     }
     case 'join': {
@@ -283,6 +321,7 @@ function onMessage(m) {
     }
     case 'chat': {
       addChat(m.name, m.text, m.id === me.id);
+      if (m.id !== me.id) noteChat(m.name, m.text);
       const p = peers.get(m.id);
       if (p) showBubble(p, m.text);
       return;
@@ -293,7 +332,17 @@ function onMessage(m) {
       return;
     }
     case 'sys': addSys(m.text); return;
-    case 'err': toast(m.text); return;
+    case 'err':
+      toast(m.text);
+      if (m.need && L.ROOM_BY_ID[m.need] && L.ROOM_BY_ID[m.need].price > 0) shop.open(L.ROOM_BY_ID[m.need]);
+      return;
+    case 'rooms': roomCounts = m.counts || {}; if (curPanel === 'rooms') renderRooms(); return;
+    case 'passes': setPasses(m.passes); return;
+    case 'ball': if (world.setBall) world.setBall(m.b, m.frozen); return;
+    case 'goal':
+      if (world.celebrate) { world.celebrate(m.by); world.setScores(m.top); }
+      toast(`Bàn thắng! ${m.by} vừa ghi bàn.`);
+      return;
     case 'video': applyVideo(m.video); return;
     case 'queue': applyQueue(m.queue); return;
   }
@@ -360,7 +409,7 @@ $('chatForm').addEventListener('submit', (e) => {
 });
 $('chatInput').addEventListener('keydown', (e) => {
   e.stopPropagation();
-  if (e.key === 'Escape') $('chatInput').blur();
+  if (e.key === 'Escape') { $('chatInput').blur(); closePanel(); }
 });
 $('urlInput').addEventListener('keydown', (e) => {
   e.stopPropagation();
@@ -387,7 +436,7 @@ function updateOnline() {
 }
 function updatePeopleList() {
   const box = $('peopleList');
-  if (box.hidden) return;
+  if (curPanel !== 'people') return;
   box.innerHTML = '';
   [...peers.values()].sort((a, b) => a.id - b.id).forEach((p) => {
     const d = document.createElement('div');
@@ -395,26 +444,17 @@ function updatePeopleList() {
     const n = document.createElement('span');
     n.textContent = p.name + (p.isMe ? ' (bạn)' : '');
     const s = document.createElement('small');
-    s.textContent = p.seat !== null ? L.SEATS[p.seat].label : 'đang đứng';
+    s.textContent = p.seat !== null && RL.SEATS[p.seat] ? RL.SEATS[p.seat].label : 'đang đứng';
     d.append(n, s);
     box.appendChild(d);
   });
 }
-$('onlinePill').addEventListener('click', () => {
-  $('peopleList').hidden = !$('peopleList').hidden;
-  updatePeopleList();
-});
-$('helpBtn').addEventListener('click', () => ($('help').hidden = false));
 $('helpClose').addEventListener('click', () => ($('help').hidden = true));
-$('vpToggle').addEventListener('click', () => {
-  const c = $('videoPanel').classList.toggle('collapsed');
-  $('vpIcon').setAttribute('href', c ? '#i-plus' : '#i-minus');
-});
 function updateSeatChip() {
   const chip = $('seatChip');
   if (me.seat === null) { chip.hidden = true; return; }
   chip.hidden = false;
-  chip.innerHTML = `${icon('seat')}<span>Bạn đang ngồi <b>${L.SEATS[me.seat].label}</b></span><kbd>Space</kbd><span class="muted">để đứng dậy</span>`;
+  chip.innerHTML = `${icon('seat')}<span>Bạn đang ngồi <b>${RL.SEATS[me.seat].label}</b></span><kbd>Space</kbd><span class="muted">để đứng dậy</span>`;
 }
 
 // ====================== YouTube & đồng bộ ======================
@@ -672,6 +712,177 @@ $('fullBtn').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen();
   else document.documentElement.requestFullscreen?.().catch(() => {});
 });
+if (!document.documentElement.requestFullscreen) $('fullBtn').hidden = true;
+
+// ====================== Thanh công cụ dọc ======================
+const PANELS = {
+  rooms: ['rooms', 'Chọn rạp'],
+  screen: ['screen', 'Màn hình'],
+  chat: ['chat', 'Trò chuyện'],
+  emote: ['smile', 'Biểu cảm'],
+  people: ['users', 'Người trong phòng'],
+};
+let curPanel = null;
+function openPanel(name) {
+  if (name === 'help') { closePanel(); $('help').hidden = false; return; }
+  if (curPanel === name) { closePanel(); return; }
+  curPanel = name;
+  const [ic, title] = PANELS[name];
+  $('flyIcon').setAttribute('href', '#i-' + ic);
+  $('flyTitle').textContent = title;
+  document.querySelectorAll('.fly').forEach((el) => (el.hidden = el.id !== 'fly-' + name));
+  document.querySelectorAll('#toolbar [data-panel]').forEach((b) => b.classList.toggle('on', b.dataset.panel === name));
+  $('flyout').hidden = false;
+  if (name === 'rooms') renderRooms();
+  if (name === 'people') updatePeopleList();
+  if (name === 'chat') {
+    unread = 0; updateBadge(); $('chatPeek').innerHTML = '';
+    const log = $('chatLog'); log.scrollTop = log.scrollHeight;
+    if (!TOUCH) setTimeout(() => $('chatInput').focus(), 30);
+  }
+  if (name === 'screen') {
+    const arc = curRoom.kind === 'arcade';
+    $('noScreen').hidden = !arc;
+    $('screenBody').hidden = arc;
+  }
+}
+function closePanel() {
+  curPanel = null;
+  $('flyout').hidden = true;
+  document.querySelectorAll('#toolbar [data-panel]').forEach((b) => b.classList.remove('on'));
+  document.activeElement?.blur?.();
+}
+document.querySelectorAll('#toolbar [data-panel]').forEach((b) => b.addEventListener('click', () => openPanel(b.dataset.panel)));
+$('flyClose').addEventListener('click', closePanel);
+$('onlinePill').addEventListener('click', () => openPanel('people'));
+$('roomPill').addEventListener('click', () => openPanel('rooms'));
+
+let unread = 0;
+function updateBadge() { const b = $('chatBadge'); b.hidden = unread === 0; b.textContent = unread > 9 ? '9+' : unread; }
+function noteChat(name, text) {
+  if (curPanel === 'chat') return;
+  unread++; updateBadge();
+  const peek = $('chatPeek');
+  const p = document.createElement('p');
+  const n = document.createElement('b');
+  n.textContent = name + ':'; n.style.color = nameColor(name);
+  p.append(n, document.createTextNode(text.length > 80 ? text.slice(0, 80) + '…' : text));
+  peek.appendChild(p);
+  while (peek.children.length > 3) peek.removeChild(peek.firstChild);
+  setTimeout(() => p.remove(), 6000);
+}
+
+// ====================== Phòng, vé, thanh toán ======================
+const shop = createShop({
+  store, toast,
+  onToken: (token) => { send({ t: 'pass', token }); toast('Đã nhận vé! Bạn có thể vào phòng mới rồi.'); },
+});
+shop.onGo((id) => { if (id) goRoom(id); });
+
+function setPasses(list) {
+  passes = new Map((list || []).map((p) => [p.room, p.exp]));
+  if (curPanel === 'rooms') renderRooms();
+}
+const hasPass = (id) => {
+  const r = L.ROOM_BY_ID[id];
+  if (!r || !(r.price > 0)) return true;
+  if (!passes.has(id)) return false;
+  const exp = passes.get(id);
+  return exp === 0 || exp > serverNow();
+};
+function daysLeft(id) {
+  const exp = passes.get(id);
+  if (!exp) return 'vĩnh viễn';
+  return 'còn ' + Math.max(1, Math.ceil((exp - serverNow()) / 86400000)) + ' ngày';
+}
+function renderRooms() {
+  const box = $('roomList');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const r of L.ROOMS) {
+    const here = r.id === curRoom.id;
+    const locked = !hasPass(r.id);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `room-card t-${r.id}${here ? ' here' : ''}${locked ? ' locked' : ''}`;
+    const price = r.price > 0 ? new Intl.NumberFormat('vi-VN').format(r.price) + 'đ' : 'Miễn phí';
+    const n = roomCounts[r.id] || 0;
+    const cta = here ? 'Đang ở đây' : locked ? 'Mua vé ' + price : 'Vào';
+    const state = here ? '' : (r.price > 0 && !locked ? `<span class="state">Đã có vé · ${daysLeft(r.id)}</span>` : (r.price > 0 ? `<span>${icon('lock')} ${price}</span>` : ''));
+    b.innerHTML = `<div class="rc-top"><b>${r.name}</b><span class="tag">${r.tag}</span></div><p>${r.desc}</p>
+      <div class="rc-bot"><span>${icon('users')} ${n} người ${state ? '· ' : ''}${state}</span><span class="cta">${cta}</span></div>`;
+    b.addEventListener('click', () => { if (!here) goRoom(r.id); });
+    box.appendChild(b);
+  }
+}
+let lastRoomSwitch = -9999;
+function goRoom(id) {
+  const r = L.ROOM_BY_ID[id];
+  if (!r || r.id === curRoom.id) return;
+  if (!hasPass(id)) { shop.open(r); return; }
+  if (performance.now() - lastRoomSwitch < 1100) { toast('Chờ một giây rồi đổi phòng nhé.'); return; }
+  lastRoomSwitch = performance.now();
+  send({ t: 'room', room: id });
+}
+$('ticketBtn').addEventListener('click', async () => {
+  const ok = await shop.redeem($('ticketInput').value);
+  if (ok) { $('ticketInput').value = ''; toast('Đã thêm vé.'); }
+});
+$('ticketInput').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') $('ticketBtn').click(); });
+
+// ====================== Trò chơi nhỏ + điểm tương tác ======================
+let gameOpen = false;
+const games = createGames({
+  store, send,
+  onOpen: () => { gameOpen = true; keys.clear(); },
+  onClose: () => { gameOpen = false; },
+});
+const touch = createTouch({ onAct: () => act() });
+
+let interactId = null;
+let nearest = null;
+let lastNear = 0;
+function updateInteract(force) {
+  const now = performance.now();
+  if (!force && now - lastNear < 120) return;
+  lastNear = now;
+  nearest = null;
+  if (joined && me.seat === null && !gameOpen) {
+    let bd = Infinity;
+    for (const it of RL.INTERACT || []) {
+      const d = Math.hypot(it.x - me.x, it.z - me.z);
+      if (d < it.r && d < bd) { bd = d; nearest = it; }
+    }
+  }
+  const id = nearest ? nearest.id : null;
+  if (id !== interactId || force) {
+    interactId = id;
+    if (nearest) $('actText').textContent = nearest.type === 'door' ? nearest.label : 'Chơi: ' + nearest.label;
+    $('prompt').hidden = !nearest;
+  }
+  // nhãn nút cảm ứng
+  if (TOUCH) {
+    if (nearest) touch.setAction(nearest.type === 'door' ? 'Vào' : 'Chơi', nearest.type === 'door' ? 'enter' : 'gamepad', false);
+    else if (me.seat !== null) touch.setAction('Đứng dậy', 'seat', false);
+    else if (RL.SEATS.length) touch.setAction('Ngồi', 'seat', !nearSeat());
+    else touch.setAction('—', 'hand', true);
+  }
+}
+function nearSeat() {
+  for (const s of RL.SEATS) if (!seatOwner.has(s.i) && Math.hypot(s.x - me.x, s.z - me.z) < 3.6) return true;
+  return false;
+}
+function act() {
+  if (!joined) return;
+  if (me.seat !== null) { send({ t: 'stand' }); return; }
+  if (nearest) {
+    if (nearest.type === 'game') { games.open(nearest.game); closePanel(); }
+    else if (nearest.type === 'door') goRoom(nearest.go);
+    return;
+  }
+  sitNearest();
+}
+$('actBtn').addEventListener('click', act);
 
 // ====================== Điều khiển ======================
 const keys = new Set();
@@ -680,10 +891,17 @@ window.addEventListener('keydown', (e) => {
   if (!joined || typing()) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
-  if (k === 'enter') { e.preventDefault(); $('chatInput').focus(); return; }
-  if (k === 'escape') { $('help').hidden = true; return; }
+  if (k === 'escape') {
+    if (!$('shop').hidden) shop.close();
+    else if (gameOpen) games.close();
+    else if (!$('help').hidden) $('help').hidden = true;
+    else closePanel();
+    return;
+  }
+  if (gameOpen || !$('shop').hidden) return;
+  if (k === 'enter') { e.preventDefault(); if (curPanel !== 'chat') openPanel('chat'); else $('chatInput').focus(); return; }
   if (/^[1-7]$/.test(k)) { doEmote(EMOTE_LIST[+k - 1].key); return; }
-  if (k === 'e') { sitNearest(); return; }
+  if (k === 'e') { act(); return; }
   if (k === ' ') { e.preventDefault(); if (me.seat !== null) send({ t: 'stand' }); return; }
   keys.add(k);
   if (k.startsWith('arrow')) e.preventDefault();
@@ -694,7 +912,7 @@ window.addEventListener('blur', () => keys.clear());
 function sitNearest() {
   if (me.seat !== null) return;
   let best = null, bd = 3.6;
-  for (const s of L.SEATS) {
+  for (const s of RL.SEATS) {
     if (seatOwner.has(s.i)) continue;
     const d = Math.hypot(s.x - me.x, s.z - me.z);
     if (d < bd) { bd = d; best = s; }
@@ -724,6 +942,7 @@ canvas.addEventListener('pointerdown', (e) => {
     pinchBase = Math.hypot(a.x - b.x, a.y - b.y);
   }
   document.activeElement?.blur?.();
+  if (curPanel && TOUCH && window.innerWidth <= 700) closePanel();
 });
 canvas.addEventListener('pointermove', (e) => {
   const prevP = pointers.get(e.pointerId);
@@ -786,7 +1005,7 @@ function onClick(e) {
     const owner = seatOwner.get(si);
     if (owner !== undefined && owner !== me.id) {
       const p = peers.get(owner);
-      toast(`Ghế ${L.SEATS[si].label} đã có ${p ? p.name : 'người'} ngồi rồi.`);
+      toast(`Ghế ${RL.SEATS[si].label} đã có ${p ? p.name : 'người'} ngồi rồi.`);
     } else if (owner !== me.id) send({ t: 'sit', seat: si });
     return;
   }
@@ -805,16 +1024,16 @@ function groundPoint(r) {
   for (let i = 0; i < 400; i++) {
     t += 0.2;
     const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
-    if (y <= L.heightAt(z) + 0.02) {
+    if (y <= RL.heightAt(z) + 0.02) {
       // tinh chỉnh bằng chia đôi
       let a = prevT, b = t;
       for (let k = 0; k < 8; k++) {
         const m = (a + b) / 2;
-        (o.y + d.y * m <= L.heightAt(o.z + d.z * m)) ? (b = m) : (a = m);
+        (o.y + d.y * m <= RL.heightAt(o.z + d.z * m)) ? (b = m) : (a = m);
       }
       const px = o.x + d.x * b, pz = o.z + d.z * b;
-      if (px < L.BOUNDS.minX - 0.5 || px > L.BOUNDS.maxX + 0.5 || pz < L.BOUNDS.minZ - 0.5 || pz > L.BOUNDS.maxZ + 0.5) return null;
-      return L.resolve(px, pz);
+      if (px < RL.BOUNDS.minX - 0.5 || px > RL.BOUNDS.maxX + 0.5 || pz < RL.BOUNDS.minZ - 0.5 || pz > RL.BOUNDS.maxZ + 0.5) return null;
+      return RL.resolve(px, pz);
     }
     prevT = t;
     if (Math.abs(x) > 40 || Math.abs(z) > 60) return null;
@@ -831,7 +1050,7 @@ function camSnap() {
   cam.yaw = Math.PI * 0 + 0;
   cam.pitch = 0.42;
   cam.dist = cam.targetDist = 5.2;
-  cam.lx = me.x; cam.lz = me.z; cam.ly = L.heightAt(me.z) + 1.4;
+  cam.lx = me.x; cam.lz = me.z; cam.ly = RL.heightAt(me.z) + 1.4;
 }
 
 function updateSelf(dt) {
@@ -842,6 +1061,11 @@ function updateSelf(dt) {
   if (keys.has('s') || keys.has('arrowdown')) mz += 1;
   if (keys.has('a') || keys.has('arrowleft')) mx -= 1;
   if (keys.has('d') || keys.has('arrowright')) mx += 1;
+  let analog = 1;
+  if (!mx && !mz && touch.state.active && !gameOpen) {
+    mx = touch.state.x; mz = touch.state.y;
+    analog = Math.min(1, Math.hypot(mx, mz));
+  }
 
   if (me.seat !== null) {
     // đang ngồi: bấm phím di chuyển để đứng dậy
@@ -866,11 +1090,11 @@ function updateSelf(dt) {
     else { dx = ax / d; dz = az / d; }
   }
 
-  const sprint = keys.has('shift');
-  const speed = (sprint ? 5.2 : 3.2) * (dx || dz ? 1 : 0);
+  const sprint = keys.has('shift') || touch.state.run;
+  const speed = (sprint ? 5.2 : 3.2) * (dx || dz ? analog : 0);
   if (speed) {
     const nx = me.x + dx * speed * dt, nz = me.z + dz * speed * dt;
-    const r = L.resolve(nx, nz);
+    const r = RL.resolve(nx, nz);
     const moved = Math.hypot(r.x - me.x, r.z - me.z);
     if (autoWalk) {
       autoWalk.stall = moved < speed * dt * 0.25 ? autoWalk.stall + dt : 0;
@@ -929,12 +1153,12 @@ function updatePeers(dt, nowMs) {
     // độ cao: ngồi -> theo ghế, đứng -> theo sàn
     let y;
     if (seated) {
-      const s = L.SEATS[p.seat];
+      const s = RL.SEATS[p.seat];
       y = s.floorY + (s.kind === 'bean' ? 0.25 : 0.52) - HIP_Y + 0.07;
-    } else y = L.heightAt(p.z);
+    } else y = RL.heightAt(p.z);
     g.position.set(p.x, y, p.z);
     if (seated) {
-      const s = L.SEATS[p.seat];
+      const s = RL.SEATS[p.seat];
       // lùi vào lưng ghế một chút
       g.position.z += s.kind === 'bean' ? 0.08 : 0.1;
     }
@@ -945,7 +1169,7 @@ function updatePeers(dt, nowMs) {
       sitting: seated,
       emote: p.emote,
       now: nowMs,
-      drop: seated ? HIP_Y - 0.07 - (L.SEATS[p.seat].kind === 'bean' ? 0.25 : 0.52) + 0.0 : 0,
+      drop: seated ? HIP_Y - 0.07 - (RL.SEATS[p.seat].kind === 'bean' ? 0.25 : 0.52) + 0.0 : 0,
     });
 
     // bong bóng chat + emoji nổi
@@ -970,7 +1194,7 @@ function updateCamera(dt) {
 
   if (p && me.seat !== null) {
     // góc nhìn thứ nhất từ chỗ ngồi
-    const s = L.SEATS[me.seat];
+    const s = RL.SEATS[me.seat];
     const ex = p.x, ez = p.z + 0.1, ey = s.floorY + (s.kind === 'bean' ? 1.15 : 1.42);
     const yaw = me.ry + cam.lookYaw;
     camera.position.lerp(tmpV.set(ex, ey, ez), k * 1.2);
@@ -986,16 +1210,16 @@ function updateCamera(dt) {
   if (p) {
     cam.lx += (p.x - cam.lx) * k * 1.5;
     cam.lz += (p.z - cam.lz) * k * 1.5;
-    cam.ly += (L.heightAt(p.z) + 1.35 - cam.ly) * k;
+    cam.ly += (RL.heightAt(p.z) + 1.35 - cam.ly) * k;
   }
   const cp = Math.cos(cam.pitch);
   let px = cam.lx + Math.sin(cam.yaw) * cam.dist * cp;
   let py = cam.ly + Math.sin(cam.pitch) * cam.dist;
   let pz = cam.lz + Math.cos(cam.yaw) * cam.dist * cp;
   // không cho camera xuyên tường / trần / sàn
-  px = THREE.MathUtils.clamp(px, L.ROOM.minX + 0.4, L.ROOM.maxX - 0.4);
-  pz = THREE.MathUtils.clamp(pz, L.ROOM.minZ + 0.6, L.ROOM.maxZ - 0.4);
-  py = THREE.MathUtils.clamp(py, L.heightAt(pz) + 0.35, L.ROOM.height - 0.4);
+  px = THREE.MathUtils.clamp(px, RL.ROOM.minX + 0.4, RL.ROOM.maxX - 0.4);
+  pz = THREE.MathUtils.clamp(pz, RL.ROOM.minZ + 0.6, RL.ROOM.maxZ - 0.4);
+  py = THREE.MathUtils.clamp(py, RL.heightAt(pz) + 0.35, RL.ROOM.height - 0.4);
   camera.position.set(px, py, pz);
   camera.lookAt(cam.lx, cam.ly, cam.lz);
   camera.fov += (60 - camera.fov) * k;
@@ -1019,6 +1243,7 @@ function frame() {
     updateSelf(dt);
     updatePeers(dt, nowMs);
     updateCamera(dt);
+    updateInteract();
   } else updateIdleCamera(t_);
 
   world.update(dt, t_, { dim: !!video.id && !video.paused, playing: !!video.id && !video.paused });

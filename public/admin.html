@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Quản trị · Rạp Chiếu Phim</title>
+<style>
+  :root { color-scheme: dark; --bg:#0d0710; --panel:#1b1226; --line:rgba(255,255,255,.14); --gold:#f5c451; --muted:#b7a9bd; --good:#4cff8a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", Roboto, system-ui, sans-serif; background: var(--bg); color:#f6efe6; padding: 16px; }
+  .wrap { max-width: 820px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 4px 0 2px; } h2 { font-size: 14px; letter-spacing:.08em; text-transform: uppercase; color: var(--gold); margin: 22px 0 8px; }
+  p.sub { color: var(--muted); margin: 0 0 16px; font-size: 13px; }
+  .card { background: var(--panel); border:1px solid var(--line); border-radius: 14px; padding: 14px; }
+  input, button { font: inherit; }
+  input { background: rgba(255,255,255,.08); border:1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: inherit; width: 100%; }
+  button { background: linear-gradient(135deg,#ff5fa8,#ff8a4c); color:#fff; border:0; border-radius: 10px; padding: 9px 14px; font-weight:600; cursor:pointer; }
+  button.ghost { background: rgba(255,255,255,.1); border:1px solid var(--line); }
+  .row { display:flex; gap: 10px; align-items:center; } .row > * { flex: none; } .row > input { flex: 1; }
+  table { width:100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align:left; padding: 9px 8px; border-bottom:1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  code { font-family: Consolas, monospace; color: var(--gold); font-size: 14px; letter-spacing:.04em; }
+  .total { font-size: 26px; font-weight: 800; color: var(--good); }
+  .muted { color: var(--muted); } .err { color:#ff7b7b; min-height: 1.4em; font-size: 13px; }
+  .empty { padding: 18px; text-align:center; color: var(--muted); }
+  .tag { display:inline-block; padding:2px 8px; border-radius:999px; background: rgba(255,255,255,.1); font-size: 12px; }
+  .tablewrap { overflow-x:auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Quản trị rạp chiếu phim</h1>
+  <p class="sub">Đối chiếu app ngân hàng, thấy tiền về đúng <b>số tiền</b> và <b>nội dung</b> thì bấm “Xác nhận”. Người chơi sẽ nhận vé trong vài giây.</p>
+
+  <div class="card" id="login">
+    <div class="row">
+      <input id="key" type="password" placeholder="Nhập khoá quản trị (ADMIN_KEY)" autocomplete="off">
+      <button id="go" type="button">Đăng nhập</button>
+    </div>
+    <div class="err" id="loginErr"></div>
+  </div>
+
+  <div id="main" hidden>
+    <div class="card row" style="justify-content:space-between">
+      <div><div class="muted" style="font-size:12px">Tổng đã nhận (từ lúc ghi sổ)</div><div class="total" id="total">0đ</div></div>
+      <button class="ghost" id="logout" type="button">Đăng xuất</button>
+    </div>
+    <h2>Đơn đang chờ tiền</h2>
+    <div class="card tablewrap"><table><thead><tr><th>Nội dung CK</th><th>Phòng</th><th>Số tiền</th><th>Tạo lúc</th><th></th></tr></thead><tbody id="pending"></tbody></table></div>
+    <h2>Xác nhận theo mã</h2>
+    <div class="card"><div class="row"><input id="manual" placeholder="Ví dụ: RAPG7K2QM" maxlength="40" autocomplete="off"><button id="manualBtn" type="button">Xác nhận</button></div><div class="err" id="manualErr"></div></div>
+    <h2>Đã thanh toán</h2>
+    <div class="card tablewrap"><table><thead><tr><th>Nội dung CK</th><th>Phòng</th><th>Số tiền</th><th>Lúc</th><th>Nguồn</th></tr></thead><tbody id="paid"></tbody></table></div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const NAMES = { S: 'Rạp Bạc', G: 'Rạp Vàng', V: 'Rạp Kim Cương' };
+const SOURCE = { webhook: 'Tự động', admin: 'Thủ công' };
+const money = (n) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
+const when = (t) => new Date(t).toLocaleString('vi-VN');
+let key = '';
+try { key = sessionStorage.getItem('adminKey') || ''; } catch {}
+let timer = null;
+
+function cell(tr, text, code) {
+  const td = document.createElement('td');
+  if (code) { const c = document.createElement('code'); c.textContent = text; td.appendChild(c); } else td.textContent = text;
+  tr.appendChild(td); return td;
+}
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { 'x-admin-key': key, 'Content-Type': 'application/json' } });
+  return { status: r.status, json: await r.json().catch(() => ({})) };
+}
+async function confirmCode(code, errEl) {
+  if (!confirm('Bạn đã thấy tiền về tài khoản với nội dung ' + code + '?')) return;
+  const r = await api('/api/admin/confirm', { method: 'POST', body: JSON.stringify({ code }) });
+  if (errEl) errEl.textContent = r.json.ok ? '' : (r.json.reason || r.json.error || 'Không xác nhận được');
+  load();
+}
+async function load() {
+  const r = await api('/api/admin/orders');
+  if (r.status !== 200) { show(false); $('loginErr').textContent = 'Sai khoá quản trị.'; return; }
+  $('total').textContent = money(r.json.total);
+  const p = $('pending'); p.innerHTML = '';
+  if (!r.json.pending.length) p.innerHTML = '<tr><td colspan="5" class="empty">Chưa có đơn nào đang chờ</td></tr>';
+  for (const o of r.json.pending) {
+    const tr = document.createElement('tr');
+    cell(tr, o.code, true); cell(tr, NAMES[o.code[3]] || o.room); cell(tr, money(o.amount)); cell(tr, when(o.createdAt));
+    const td = document.createElement('td'); const b = document.createElement('button'); b.textContent = 'Xác nhận';
+    b.onclick = () => confirmCode(o.code); td.appendChild(b); tr.appendChild(td); p.appendChild(tr);
+  }
+  const d = $('paid'); d.innerHTML = '';
+  if (!r.json.paid.length) d.innerHTML = '<tr><td colspan="5" class="empty">Chưa có giao dịch</td></tr>';
+  for (const o of r.json.paid) {
+    const tr = document.createElement('tr');
+    cell(tr, o.code, true); cell(tr, NAMES[o.code[3]] || o.room); cell(tr, money(o.amount)); cell(tr, when(o.paidAt));
+    const td = cell(tr, ''); const s = document.createElement('span'); s.className = 'tag'; s.textContent = SOURCE[o.source] || o.source; td.appendChild(s);
+    d.appendChild(tr);
+  }
+}
+function show(on) {
+  $('login').hidden = on; $('main').hidden = !on;
+  clearInterval(timer);
+  if (on) timer = setInterval(load, 8000);
+}
+$('go').onclick = async () => {
+  key = $('key').value.trim(); $('loginErr').textContent = '';
+  try { sessionStorage.setItem('adminKey', key); } catch {}
+  const r = await api('/api/admin/orders');
+  if (r.status === 200) { show(true); load(); } else $('loginErr').textContent = 'Sai khoá quản trị.';
+};
+$('key').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('go').click(); });
+$('logout').onclick = () => { key = ''; try { sessionStorage.removeItem('adminKey'); } catch {} show(false); };
+$('manualBtn').onclick = () => { const v = $('manual').value.trim(); if (v) confirmCode(v, $('manualErr')); };
+if (key) api('/api/admin/orders').then((r) => { if (r.status === 200) { show(true); load(); } });
+</script>
+</body>
+</html>

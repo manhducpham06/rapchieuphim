@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeLabel } from './avatar.js';
+import { THEMES, buildExtras, makeDoor, addInteractMarkers, disposeTree } from './themes.js';
 
 const L = window.LAYOUT;
 const R = L.ROOM;
@@ -30,11 +31,11 @@ const cloneTex = (t, rx, ry) => {
   return n;
 };
 
-function carpetTexture() {
+function carpetTexture(base = '#4a0c19', line = 'rgba(214,172,92,0.34)', dot = 'rgba(214,172,92,0.5)') {
   return canvasTex(256, 256, (c, w, h) => {
-    c.fillStyle = '#4a0c19';
+    c.fillStyle = base;
     c.fillRect(0, 0, w, h);
-    c.strokeStyle = 'rgba(214,172,92,0.34)';
+    c.strokeStyle = line;
     c.lineWidth = 2;
     for (let i = -h; i < w + h; i += 64) {
       c.beginPath();
@@ -46,7 +47,7 @@ function carpetTexture() {
       c.lineTo(i, h);
       c.stroke();
     }
-    c.fillStyle = 'rgba(214,172,92,0.5)';
+    c.fillStyle = dot;
     for (let x = 32; x < w; x += 64)
       for (let y = 32; y < h; y += 64) {
         c.beginPath();
@@ -60,11 +61,11 @@ function carpetTexture() {
   });
 }
 
-function wallTexture() {
+function wallTexture(a = '#2c1020', b = '#46182c') {
   return canvasTex(256, 256, (c, w, h) => {
     const g = c.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#2c1020');
-    g.addColorStop(1, '#46182c');
+    g.addColorStop(0, a);
+    g.addColorStop(1, b);
     c.fillStyle = g;
     c.fillRect(0, 0, w, h);
     for (let x = 0; x < w; x += 32) {
@@ -76,11 +77,11 @@ function wallTexture() {
   });
 }
 
-function tileTexture() {
+function tileTexture(dark = '#1c1b24', light = '#d8ccb2') {
   return canvasTex(128, 128, (c, w, h) => {
     for (let i = 0; i < 2; i++)
       for (let j = 0; j < 2; j++) {
-        c.fillStyle = (i + j) % 2 ? '#1c1b24' : '#d8ccb2';
+        c.fillStyle = (i + j) % 2 ? dark : light;
         c.fillRect((i * w) / 2, (j * h) / 2, w / 2, h / 2);
       }
   });
@@ -201,7 +202,8 @@ function box(w, h, d, mat, x, y, z, parent) {
 }
 const lerp = (a, b, t) => a + (b - a) * t;
 
-export function buildWorld(scene) {
+export function buildWorld(scene, themeId = 'std') {
+  const T = THEMES[themeId] || THEMES.std;
   const root = new THREE.Group();
   scene.add(root);
   const H = R.height;
@@ -209,13 +211,13 @@ export function buildWorld(scene) {
   const roomLen = R.maxZ - R.minZ;
 
   // ===== Ánh sáng =====
-  const ambient = new THREE.AmbientLight(0xffe6d0, 0.62);
-  const hemi = new THREE.HemisphereLight(0xfff0e0, 0x3a1020, 0.85);
+  const ambient = new THREE.AmbientLight(T.ambient, 0.62);
+  const hemi = new THREE.HemisphereLight(T.hemi[0], T.hemi[1], 0.85);
   root.add(ambient, hemi);
   const sconceLights = [];
   for (const sx of [-1, 1])
     for (const z of [-9, 3, 13]) {
-      const l = new THREE.PointLight(0xffb870, 26, 18, 2);
+      const l = new THREE.PointLight(T.light, 26, 18, 2);
       l.position.set(sx * 13.5, 5, z);
       root.add(l);
       sconceLights.push(l);
@@ -225,7 +227,7 @@ export function buildWorld(scene) {
   root.add(screenLight);
 
   // ===== Sàn =====
-  const carpet = carpetTexture();
+  const carpet = carpetTexture(...T.carpet);
   const floorFront = new THREE.Mesh(
     new THREE.PlaneGeometry(30, L.ZA - R.minZ),
     std(0xffffff, { map: cloneTex(carpet, 30 / 4, (L.ZA - R.minZ) / 4), roughness: 0.95 })
@@ -247,13 +249,13 @@ export function buildWorld(scene) {
   shape.closePath();
   const tiers = new THREE.Mesh(
     new THREE.ExtrudeGeometry(shape, { depth: 30, bevelEnabled: false }),
-    std(0x4a0f1d, { roughness: 0.95 })
+    std(T.tiers, { roughness: 0.95 })
   );
   tiers.rotation.y = -Math.PI / 2;
   tiers.position.x = 15;
   root.add(tiers);
 
-  const ledMat = new THREE.MeshBasicMaterial({ color: 0xffc766, toneMapped: false });
+  const ledMat = new THREE.MeshBasicMaterial({ color: T.led, toneMapped: false });
   for (let r = 0; r < L.ROWS; r++) {
     box(29.6, 0.03, 0.07, ledMat, 0, (r + 1) * L.STEP_H + 0.016, L.ZA + r * L.ROW_GAP + L.RAMP * L.ROW_GAP, root);
     // đèn đánh dấu lối đi
@@ -263,7 +265,7 @@ export function buildWorld(scene) {
   // Sàn khu sảnh (caro)
   const lobby = new THREE.Mesh(
     new THREE.PlaneGeometry(30, R.maxZ - L.ZB),
-    std(0xffffff, { map: cloneTex(tileTexture(), 15, (R.maxZ - L.ZB) / 2), roughness: 0.35, metalness: 0.1 })
+    std(0xffffff, { map: cloneTex(tileTexture(...T.tile), 15, (R.maxZ - L.ZB) / 2), roughness: 0.35, metalness: 0.1 })
   );
   lobby.rotation.x = -Math.PI / 2;
   lobby.position.set(0, L.TOP_Y + 0.006, (L.ZB + R.maxZ) / 2);
@@ -275,7 +277,7 @@ export function buildWorld(scene) {
   root.add(under);
 
   // ===== Tường & trần =====
-  const wallT = wallTexture();
+  const wallT = wallTexture(...T.wall);
   const matSide = std(0xffffff, { map: cloneTex(wallT, roomLen / 3, 2), roughness: 0.9 });
   const matBack = std(0xffffff, { map: cloneTex(wallT, 10, 2), roughness: 0.9 });
   box(0.5, H, roomLen + 1, matSide, R.minX - 0.25, H / 2, centerZ, root);
@@ -285,7 +287,7 @@ export function buildWorld(scene) {
   box(31, 0.5, roomLen + 1, std(0x0d0d1c, { roughness: 1 }), 0, H + 0.25, centerZ, root);
 
   // Viền vàng chạy quanh tường
-  const gold = std(0xd9ad4b, { metalness: 0.75, roughness: 0.3 });
+  const gold = std(T.trim, { metalness: 0.75, roughness: 0.3 });
   box(0.08, 0.1, roomLen, gold, R.minX + 0.04, 1.05, centerZ, root);
   box(0.08, 0.1, roomLen, gold, R.maxX - 0.04, 1.05, centerZ, root);
   box(30, 0.1, 0.08, gold, 0, 1.05 + L.TOP_Y, R.maxZ - 0.04, root);
@@ -293,7 +295,7 @@ export function buildWorld(scene) {
   box(0.08, 0.14, roomLen, gold, R.maxX - 0.04, H - 0.9, centerZ, root);
 
   // Đèn trần + bầu trời sao
-  const ceilBase = new THREE.Color(0xffe3b0);
+  const ceilBase = new THREE.Color(T.ceil);
   const ceilMat = new THREE.MeshBasicMaterial({ color: ceilBase.clone(), toneMapped: false });
   for (const x of [-9, 0, 9]) box(0.35, 0.05, roomLen - 4, ceilMat, x, H - 0.03, centerZ, root);
   const starPos = new Float32Array(600 * 3);
@@ -318,7 +320,7 @@ export function buildWorld(scene) {
   root.add(proj);
 
   // Đèn tường
-  const sconceBase = new THREE.Color(0xffcf8a);
+  const sconceBase = new THREE.Color(T.sconce);
   const sconceMat = new THREE.MeshBasicMaterial({ color: sconceBase.clone(), toneMapped: false });
   for (const z of [-11, -4, 3, 10, 16]) {
     box(0.18, 0.55, 0.3, sconceMat, R.minX + 0.12, 4.2, z, root);
@@ -334,7 +336,7 @@ export function buildWorld(scene) {
 
   const S = L.SCREEN;
   box(S.w + 0.5, S.h + 0.5, 0.05, new THREE.MeshBasicMaterial({ color: 0x000000 }), S.x, S.y, S.z - 0.05, root);
-  const trim = std(0xd9ad4b, { metalness: 0.8, roughness: 0.25 });
+  const trim = std(T.trim, { metalness: 0.8, roughness: 0.25 });
   box(S.w + 0.8, 0.26, 0.26, trim, S.x, S.y + S.h / 2 + 0.13, S.z + 0.05, root);
   box(S.w + 0.8, 0.26, 0.26, trim, S.x, S.y - S.h / 2 - 0.13, S.z + 0.05, root);
   box(0.26, S.h + 0.5, 0.26, trim, S.x - S.w / 2 - 0.13, S.y, S.z + 0.05, root);
@@ -349,7 +351,7 @@ export function buildWorld(scene) {
   root.add(hole);
 
   // Rèm nhung xếp nếp
-  const curtainMat = std(0x8e1226, { roughness: 0.85, side: THREE.DoubleSide, emissive: 0x1e0208 });
+  const curtainMat = std(T.curtain, { roughness: 0.85, side: THREE.DoubleSide, emissive: T.curtainEm });
   const curtainW = R.maxX - (S.w / 2 + 0.1);
   for (const sgn of [-1, 1]) {
     const geo = new THREE.PlaneGeometry(curtainW, 13.2, 64, 1);
@@ -375,8 +377,8 @@ export function buildWorld(scene) {
     new THREE.BoxGeometry(0.12, 0.34, 0.9).translate(0.62, 0.58, 0.02),
     new THREE.BoxGeometry(0.5, 0.3, 0.5).translate(0, 0.15, 0.1),
   ]);
-  const velvet = std(0xb3152c, { roughness: 0.55 });
-  const frame = std(0x24242b, { roughness: 0.5, metalness: 0.3 });
+  const velvet = std(T.velvet, { roughness: 0.55 });
+  const frame = std(T.frame, { roughness: 0.5, metalness: 0.3 });
   const seatBase = new THREE.InstancedMesh(baseGeo, velvet, rowSeats.length);
   const seatBack = new THREE.InstancedMesh(backGeo, velvet, rowSeats.length);
   const seatArms = new THREE.InstancedMesh(armGeo, frame, rowSeats.length);
@@ -457,7 +459,7 @@ export function buildWorld(scene) {
   // ===== Biển neon =====
   const neon = new THREE.Mesh(
     new THREE.PlaneGeometry(10, 2.5),
-    new THREE.MeshBasicMaterial({ map: neonTexture('RẠP CHIẾU PHIM', '#ff5fa8'), transparent: true, toneMapped: false, depthWrite: false })
+    new THREE.MeshBasicMaterial({ map: neonTexture(T.title, T.neon), transparent: true, toneMapped: false, depthWrite: false })
   );
   neon.position.set(0, 10.2, R.maxZ - 0.07);
   neon.rotation.y = Math.PI;
@@ -584,6 +586,11 @@ export function buildWorld(scene) {
     root.add(g);
   });
 
+  // ===== Cổng sang Khu Giải Trí + điểm tương tác =====
+  const door = makeDoor(root, L.DOOR_ARCADE.x + 1.8, L.TOP_Y, L.DOOR_ARCADE.z, -Math.PI / 2, 'KHU GIẢI TRÍ', '#ff9a3c', '#ff2d95', 0xd9ad4b);
+  const markers = addInteractMarkers(root, L.INTERACT, L.heightAt);
+  const extras = buildExtras(themeId, root);
+
   // ===== API =====
   let dimCur = 0;
   const pickables = [seatBase, seatBack, seatArms, ...beanMeshes];
@@ -616,11 +623,18 @@ export function buildWorld(scene) {
     ceilMat.color.copy(ceilBase).multiplyScalar(1 - 0.93 * d);
     screenLight.intensity = o.playing ? 30 * (0.9 + 0.1 * Math.sin(t * 3.1)) : 0;
     screenLight.color.setHSL((t * 0.015) % 1, 0.35, 0.72);
+    door.update(t);
+    markers.update(t, d > 0.5);
+    if (extras) extras.update(dt, t, { dim: d > 0.5 });
     if (marker.visible) {
       arrow.position.y = 1.9 + Math.sin(t * 5) * 0.08;
       ring.scale.setScalar(1 + Math.sin(t * 5) * 0.05);
     }
   }
 
-  return { update, pickables, seatFromHit, setMarker };
+  function dispose() {
+    disposeTree(root);
+  }
+
+  return { kind: 'theater', update, pickables, seatFromHit, setMarker, dispose };
 }

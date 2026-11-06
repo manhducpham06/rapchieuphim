@@ -163,9 +163,80 @@
     return resolve(seat.x, seat.z - back, seat.i);
   }
 
+  // ---- Danh sách phòng (server là nơi quyết định giá) ----
+  const ROOMS = [
+    { id: 'std', name: 'Rạp Tiêu Chuẩn', kind: 'theater', tier: 0, price: 0, tag: 'Miễn phí',
+      desc: 'Rạp đỏ nhung cổ điển, đủ ghế cho cả hội.' },
+    { id: 'silver', name: 'Rạp Bạc', kind: 'theater', tier: 1, price: 5000, tag: 'Cấp 1',
+      desc: 'Tông xanh bạc sang trọng, cột trụ, đèn LED lối đi và đèn rọi trần.' },
+    { id: 'gold', name: 'Rạp Vàng', kind: 'theater', tier: 2, price: 8000, tag: 'Cấp 2',
+      desc: 'Rèm vàng, đèn chùm pha lê, thảm đỏ viền vàng và sảnh đá hoa.' },
+    { id: 'vip', name: 'Rạp Kim Cương', kind: 'theater', tier: 3, price: 10000, tag: 'Cấp 3 · VIP',
+      desc: 'Kính neon đổi màu, trần thiên hà, kim cương xoay và đom đóm ánh sáng.' },
+    { id: 'arcade', name: 'Khu Giải Trí', kind: 'arcade', tier: 0, price: 0, tag: 'Miễn phí',
+      desc: 'Sân đá bóng mini nhiều người, máy gắp thú, máy game.' },
+  ];
+  const ROOM_BY_ID = {};
+  ROOMS.forEach((r) => (ROOM_BY_ID[r.id] = r));
+
+  // ---- Điểm tương tác ở sảnh rạp ----
+  const DOOR_ARCADE = { x: 13.1, z: 14.6 };
+  const INTERACT = [
+    { id: 'lobby-mole', type: 'game', game: 'mole', x: 12.6, z: 9.6, r: 2.0, label: 'Đập chuột chũi' },
+    { id: 'lobby-claw', type: 'game', game: 'claw', x: 12.6, z: 11.2, r: 2.0, label: 'Gắp thú' },
+    { id: 'door-arcade', type: 'door', go: 'arcade', x: DOOR_ARCADE.x, z: DOOR_ARCADE.z, r: 1.9, label: 'Vào Khu Giải Trí' },
+  ];
+
+  // ---- Khu Giải Trí (phòng riêng) ----
+  const AR = {};
+  AR.ROOM = { minX: -15, maxX: 15, minZ: -15, maxZ: 15, height: 9 };
+  AR.BOUNDS = { minX: -14.3, maxX: 14.3, minZ: -14.3, maxZ: 14.3 };
+  AR.SPAWN = { x: 0, z: 11 };
+  AR.PITCH = { cx: 0, cz: -7.4, hx: 8.2, hz: 4.4, goalHalf: 1.9, goalDepth: 1.5 };
+  AR.CLAWS = [{ x: -12.9, z: 1.6 }, { x: -12.9, z: 5.2 }];
+  AR.CABINETS = [{ x: 13.3, z: 1.0 }, { x: 13.3, z: 3.2 }, { x: 13.3, z: 5.4 }, { x: 13.3, z: 7.6 }];
+  AR.DOOR = { x: 0, z: 14.6 };
+  AR.BENCHES = [{ x: -6, z: 9 }, { x: 6, z: 9 }];
+  AR.COLLIDERS = [];
+  AR.CLAWS.forEach((c) => AR.COLLIDERS.push({ x: c.x, z: c.z, r: 1.0 }));
+  AR.CABINETS.forEach((c) => AR.COLLIDERS.push({ x: c.x, z: c.z, r: 0.75 }));
+  AR.BENCHES.forEach((b) => { for (const k of [-1, 0, 1]) AR.COLLIDERS.push({ x: b.x + k * 0.8, z: b.z, r: 0.5 }); });
+  AR.INTERACT = [
+    ...AR.CLAWS.map((c, i) => ({ id: 'claw' + i, type: 'game', game: 'claw', x: c.x + 1.6, z: c.z, r: 2.0, label: 'Gắp thú' })),
+    ...AR.CABINETS.map((c, i) => ({ id: 'cab' + i, type: 'game', game: 'mole', x: c.x - 1.4, z: c.z, r: 1.6, label: 'Đập chuột chũi' })),
+    { id: 'door-lobby', type: 'door', go: 'std', x: AR.DOOR.x, z: AR.DOOR.z - 1.0, r: 2.0, label: 'Về sảnh rạp' },
+  ];
+  AR.SEATS = [];
+  AR.heightAt = function () { return 0; };
+  AR.resolve = function (x, z) {
+    x = clamp(x, AR.BOUNDS.minX, AR.BOUNDS.maxX);
+    z = clamp(z, AR.BOUNDS.minZ, AR.BOUNDS.maxZ);
+    for (let pass = 0; pass < 2; pass++) {
+      for (const o of AR.COLLIDERS) {
+        const min = o.r + PLAYER_R;
+        let dx = x - o.x, dz = z - o.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < min * min) {
+          let d = Math.sqrt(d2);
+          if (d < 1e-4) { dx = 0; dz = 1; d = 1; }
+          x = o.x + (dx / d) * min;
+          z = o.z + (dz / d) * min;
+        }
+      }
+      x = clamp(x, AR.BOUNDS.minX, AR.BOUNDS.maxX);
+      z = clamp(z, AR.BOUNDS.minZ, AR.BOUNDS.maxZ);
+    }
+    return { x, z };
+  };
+
+  /** Bố cục theo loại phòng: dùng chung API {ROOM,BOUNDS,SPAWN,resolve,heightAt,SEATS,INTERACT} */
+  const THEATER = { ROOM, BOUNDS, SPAWN, resolve, heightAt, SEATS, INTERACT };
+  function layoutOf(kind) { return kind === 'arcade' ? AR : THEATER; }
+
   return {
     ROOM, BOUNDS, ROWS, ROW_GAP, ROW0_Z, STEP_H, RAMP, SEAT_GAP, BLOCKS, ZA, ZB, TOP_Y,
     SCREEN, PLAYER_R, SEAT_R, LOOK_COUNTS, SEATS, BEANBAGS, PROPS, OBSTACLES, COLLIDERS, SPAWN,
     clamp, heightAt, resolve, standPos,
+    ROOMS, ROOM_BY_ID, INTERACT, DOOR_ARCADE, ARCADE: AR, layoutOf,
   };
 });

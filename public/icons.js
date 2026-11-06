@@ -47,6 +47,22 @@ export const ICONS = {
     '<rect x="2.5" y="10.2" width="4.2" height="10.8" rx="1.2"/><path d="M8.5 10.6 12 3.4a1.3 1.3 0 0 1 1.2-.8c1.5 0 2.5 1.3 2.2 2.8L14.9 8H19a2.3 2.3 0 0 1 2.2 2.9l-1.7 7.3a2.4 2.4 0 0 1-2.3 1.8H9.8a1.3 1.3 0 0 1-1.3-1.3z"/>',
 };
 
+// ----- icon cho thanh công cụ / cửa hàng / trò chơi -----
+Object.assign(ICONS, {
+  rooms: '<path d="M4 20V5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5V20"/><path d="M2.5 20h19"/><path d="M16 9h3.5A1.5 1.5 0 0 1 21 10.5V20"/><circle cx="12.4" cy="12.5" r="1" fill="currentColor"/>',
+  chat: '<path d="M4.5 4h15A2.5 2.5 0 0 1 22 6.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.6 3.6a.6.6 0 0 1-1-.5V17h-.9A2.5 2.5 0 0 1 2 14.5v-8A2.5 2.5 0 0 1 4.5 4z"/>',
+  smile: '<circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8.7" cy="9.8" r="1.35"/><circle cx="15.3" cy="9.8" r="1.35"/><path d="M7.6 14.2c1 2 2.6 3 4.4 3s3.4-1 4.4-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  gamepad: '<path d="M7.2 6.5h9.6c2.3 0 3.6 1.3 4.3 4.2l1 4.2c.4 2-.7 3.6-2.5 3.6-1.1 0-1.9-.5-2.7-1.6l-1-1.4H8.1l-1 1.4c-.8 1.1-1.6 1.6-2.7 1.6-1.8 0-2.9-1.6-2.5-3.6l1-4.2c.7-2.9 2-4.2 4.3-4.2z"/><path d="M7.5 9.4v3M6 10.9h3" stroke="#000" stroke-opacity=".55" stroke-width="1.5" stroke-linecap="round" fill="none"/><circle cx="15.4" cy="10.4" r=".95" fill="#000" fill-opacity=".55"/><circle cx="17.6" cy="12.3" r=".95" fill="#000" fill-opacity=".55"/>',
+  ticket: '<path d="M3 8.2A2 2 0 0 0 5 6.2h14a2 2 0 0 0 2 2 2 2 0 0 0 0 7.6 2 2 0 0 0-2 2H5a2 2 0 0 0-2-2z" transform="translate(0 -.9)"/><path d="M14 6.4v11.2" stroke="#000" stroke-opacity=".45" stroke-width="1.4" stroke-dasharray="2 2" fill="none"/>',
+  copy: '<rect x="8.5" y="8.5" width="11.5" height="12" rx="2.2"/><path d="M15.5 5.6V5A2.2 2.2 0 0 0 13.3 3H6.2A2.2 2.2 0 0 0 4 5.2v8.1A2.2 2.2 0 0 0 6.2 15.5h.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  check: '<path d="m4.5 12.8 4.6 4.6L19.6 6.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  lock: '<rect x="4.5" y="10.5" width="15" height="10.5" rx="2.4"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  crown: '<path d="m3 8 4.4 3.6L12 4.5l4.6 7.1L21 8l-1.7 10.5H4.7z"/><rect x="4.6" y="19.4" width="14.8" height="1.8" rx=".9"/>',
+  ball: '<circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m12 7.2 4 2.9-1.5 4.7h-5L8 10.1z"/><path d="M12 7.2V3M16 10.1l4-1.3M14.5 14.8l2.5 3.6M9.5 14.8l-2.5 3.6M8 10.1 4 8.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+  hand: '<path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-1V4a1.5 1.5 0 0 1 3 0v7m0-5.5a1.5 1.5 0 0 1 3 0V13m0-4.3a1.5 1.5 0 0 1 3 0V15c0 4-2.5 6.5-6.3 6.5-2.6 0-4-1-5.4-3.2L4.200 13.300a1.500 1.500 0 0 1 2.500-1.600L8 13.500" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+  more: '<circle cx="5.5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18.5" cy="12" r="1.8"/>',
+});
+
 export const EMOTE_META = [
   { key: 'wave', label: 'Vẫy tay', icon: 'wave', color: '#ffb347' },
   { key: 'clap', label: 'Vỗ tay', icon: 'clap', color: '#ffd24a' },

@@ -2,7 +2,8 @@
 /*
  * Server rạp chiếu phim cộng đồng - không cần cài thư viện nào.
  * - Phục vụ file tĩnh trong /public
- * - WebSocket (tự cài theo RFC 6455) cho phòng chung: vị trí, ghế, chat, emote, video đồng bộ
+ * - API thanh toán vé phòng (xem payments.js)
+ * - WebSocket (tự cài theo RFC 6455): nhiều phòng độc lập, mỗi phòng có người chơi, ghế, chat, video riêng
  */
 const http = require('http');
 const fs = require('fs');
@@ -10,6 +11,8 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const L = require('./public/layout.js');
+const { createPayments } = require('./payments.js');
+const { Football } = require('./football.js');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -18,6 +21,9 @@ const MAX_CLIENTS = Number(process.env.MAX_CLIENTS) || 200;
 const MAX_QUEUE = 30;
 const CHAT_HISTORY = 40;
 const EMOTES = new Set(['wave', 'clap', 'heart', 'laugh', 'wow', 'popcorn', 'thumb']);
+const GAMES = { claw: 'Gắp thú', mole: 'Đập chuột chũi' };
+
+const payments = createPayments();
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -34,17 +40,141 @@ const MIME = {
 const now = () => Date.now();
 
 // ======================= HTTP =======================
+const rateMap = new Map(); // ip -> {n, t}
+function rateLimited(ip, max, windowMs) {
+  const t = now();
+  let r = rateMap.get(ip + '|' + max);
+  if (!r || t - r.t > windowMs) {
+    r = { n: 0, t };
+    rateMap.set(ip + '|' + max, r);
+  }
+  r.n++;
+  return r.n > max;
+}
+setInterval(() => {
+  const t = now();
+  for (const [k, r] of rateMap) if (t - r.t > 120000) rateMap.delete(k);
+}, 60000).unref();
+
+function clientIp(req) {
+  const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xf || req.socket.remoteAddress || '?';
+}
+
+function sendJson(res, status, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.end(body);
+}
+
+function readJson(req, max = 10 * 1024) {
+  return new Promise((resolve) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (d) => {
+      size += d.length;
+      if (size > max) {
+        resolve(null);
+        req.destroy();
+        return;
+      }
+      chunks.push(d);
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+      } catch {
+        resolve(null);
+      }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
+async function handleApi(req, res, url) {
+  const p = url.pathname;
+  const ip = clientIp(req);
+
+  if (p === '/api/webhook' && req.method === 'POST') {
+    const body = await readJson(req, 64 * 1024);
+    const q = Object.fromEntries(url.searchParams);
+    const r = payments.handleWebhook(req.headers, q, body);
+    if (r.json && r.json.confirmed) console.log(`[thanh toán] webhook xác nhận ${r.json.confirmed} đơn`);
+    return sendJson(res, r.status, r.json);
+  }
+
+  if (p.startsWith('/api/admin/')) {
+    if (rateLimited(ip, 30, 60000)) return sendJson(res, 429, { error: 'Thử lại sau' });
+    const key = req.headers['x-admin-key'];
+    if (p === '/api/admin/orders' && req.method === 'GET') {
+      const r = payments.adminList(key);
+      return r ? sendJson(res, 200, r) : sendJson(res, 401, { error: 'Sai khoá quản trị' });
+    }
+    if (p === '/api/admin/confirm' && req.method === 'POST') {
+      const body = await readJson(req);
+      const r = payments.adminConfirm(key, body && body.code);
+      if (!r) return sendJson(res, 401, { error: 'Sai khoá quản trị' });
+      if (r.ok && !r.already) console.log(`[thanh toán] chủ rạp xác nhận đơn ${r.code}`);
+      return sendJson(res, r.ok ? 200 : 400, r);
+    }
+    return sendJson(res, 404, { error: 'Không có' });
+  }
+
+  if (rateLimited(ip, 90, 60000)) return sendJson(res, 429, { error: 'Bạn thao tác quá nhanh, thử lại sau.' });
+
+  if (p === '/api/config' && req.method === 'GET') return sendJson(res, 200, payments.publicConfig());
+
+  if (p === '/api/order' && req.method === 'POST') {
+    if (rateLimited(ip, 12, 10 * 60000)) return sendJson(res, 429, { error: 'Tạo quá nhiều đơn, thử lại sau ít phút.' });
+    const body = await readJson(req);
+    if (!body) return sendJson(res, 400, { error: 'Dữ liệu không hợp lệ' });
+    const r = payments.createOrder(String(body.room || ''));
+    if (r.error) return sendJson(res, 400, { error: r.error });
+    return sendJson(res, 200, r.order);
+  }
+
+  const m = p.match(/^\/api\/order\/([A-Za-z0-9]{1,20})$/);
+  if (m && req.method === 'GET') return sendJson(res, 200, payments.status(m[1]));
+
+  if (p === '/api/redeem' && req.method === 'POST') {
+    const body = await readJson(req);
+    const v = payments.verifyToken(body && body.token);
+    return v ? sendJson(res, 200, { ok: true, room: v.room, exp: v.exp }) : sendJson(res, 400, { ok: false, error: 'Vé không hợp lệ hoặc đã hết hạn' });
+  }
+
+  return sendJson(res, 404, { error: 'Không có' });
+}
+
 const httpServer = http.createServer((req, res) => {
+  let url;
+  try {
+    url = new URL(req.url, 'http://localhost');
+  } catch {
+    res.writeHead(400);
+    return res.end('Bad request');
+  }
   let pathname;
   try {
-    pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+    pathname = decodeURIComponent(url.pathname);
   } catch {
     res.writeHead(400);
     return res.end('Bad request');
   }
   if (pathname === '/healthz') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, online: players.size }));
+    let online = 0;
+    for (const r of rooms.values()) online += r.players.size;
+    return sendJson(res, 200, { ok: true, online });
+  }
+  if (pathname.startsWith('/api/')) {
+    handleApi(req, res, url).catch((e) => {
+      console.error('Lỗi API:', e);
+      if (!res.headersSent) sendJson(res, 500, { error: 'Lỗi máy chủ' });
+    });
+    return;
   }
   if (pathname === '/') pathname = '/index.html';
   if (pathname.includes('\0')) {
@@ -133,6 +263,7 @@ class Client {
     this.alive = true;
     this.lastSeen = now();
     this.player = null;
+    this.passes = new Map(); // roomId -> hạn dùng (0 = vĩnh viễn)
     this.rate = {};
     this.msgCount = 0;
     this.msgWindow = now();
@@ -147,6 +278,27 @@ class Client {
     const t = now();
     if (t - (this.rate[key] || 0) < minMs) return false;
     this.rate[key] = t;
+    return true;
+  }
+
+  hasPass(roomId) {
+    const def = L.ROOM_BY_ID[roomId];
+    if (!def) return false;
+    if (def.price <= 0) return true;
+    if (!this.passes.has(roomId)) return false;
+    const exp = this.passes.get(roomId);
+    return exp === 0 || now() < exp;
+  }
+
+  passList() {
+    return [...this.passes.entries()].filter(([r]) => this.hasPass(r)).map(([room, exp]) => ({ room, exp }));
+  }
+
+  addToken(token) {
+    const v = payments.verifyToken(token);
+    if (!v) return false;
+    const old = this.passes.get(v.room);
+    if (old === undefined || old !== 0) this.passes.set(v.room, v.exp === 0 ? 0 : Math.max(old || 0, v.exp));
     return true;
   }
 
@@ -246,34 +398,112 @@ class Client {
     if (!this.alive) return;
     this.alive = false;
     clients.delete(this);
-    if (this.player) removePlayer(this.player);
+    if (this.player) {
+      leaveRoom(this.player, true);
+      this.player = null;
+    }
   }
 }
 
-// ======================= Trạng thái phòng =======================
+// ======================= Phòng =======================
 const clients = new Set();
-const players = new Map(); // id -> player
-const seatOwner = new Map(); // seat index -> player id
-const dirty = new Set();
-const chatLog = [];
 let nextId = 1;
 
-const video = { id: null, title: '', by: '', serial: 0, rev: 0, paused: true, pausedAt: 0, startedAt: 0 };
-let queue = [];
-let nextQid = 1;
+class Room {
+  constructor(def) {
+    this.def = def;
+    this.id = def.id;
+    this.kind = def.kind;
+    this.layout = L.layoutOf(def.kind);
+    this.players = new Map(); // id -> player
+    this.seatOwner = new Map();
+    this.dirty = new Set();
+    this.chatLog = [];
+    this.video = { id: null, title: '', by: '', serial: 0, rev: 0, paused: true, pausedAt: 0, startedAt: 0 };
+    this.queue = [];
+    this.nextQid = 1;
+    this.ball = def.kind === 'arcade' ? new Football(L.ARCADE.PITCH) : null;
+    this.ballWasMoving = false;
+  }
 
-function broadcast(obj, exceptId) {
-  const data = frame(0x1, Buffer.from(JSON.stringify(obj)));
-  for (const c of clients) {
-    if (!c.player || c.player.id === exceptId) continue;
-    c.write(data);
+  broadcast(obj, exceptId) {
+    const data = frame(0x1, Buffer.from(JSON.stringify(obj)));
+    for (const p of this.players.values()) {
+      if (p.id === exceptId) continue;
+      p.client.write(data);
+    }
+  }
+
+  sys(text) {
+    this.broadcast({ t: 'sys', text });
+  }
+
+  curTime() {
+    const v = this.video;
+    return v.paused ? v.pausedAt : Math.max(0, (now() - v.startedAt) / 1000);
+  }
+  loadVideo(id, title, by, t = 0) {
+    const v = this.video;
+    v.id = id;
+    v.title = title || '';
+    v.by = by || '';
+    v.serial++;
+    v.rev++;
+    v.paused = false;
+    v.pausedAt = t;
+    v.startedAt = now() - t * 1000;
+  }
+  clearVideo() {
+    const v = this.video;
+    v.id = null;
+    v.title = '';
+    v.by = '';
+    v.serial++;
+    v.rev++;
+    v.paused = true;
+    v.pausedAt = 0;
+    v.startedAt = 0;
+  }
+  pushVideo() {
+    this.broadcast({ t: 'video', video: { ...this.video } });
+  }
+  pushQueue() {
+    this.broadcast({ t: 'queue', queue: this.queue });
+  }
+  advance() {
+    const nx = this.queue.shift();
+    if (nx) {
+      this.loadVideo(nx.id, nx.title, nx.by, 0);
+      this.sys(`Tiếp theo: ${nx.title || nx.id}`);
+    } else {
+      this.clearVideo();
+      this.sys('Hết hàng chờ - màn hình đã tắt');
+    }
+    this.pushVideo();
+    this.pushQueue();
   }
 }
 
-function sys(text) {
-  broadcast({ t: 'sys', text });
+const rooms = new Map();
+for (const def of L.ROOMS) rooms.set(def.id, new Room(def));
+
+function counts() {
+  const o = {};
+  for (const r of rooms.values()) o[r.id] = r.players.size;
+  return o;
+}
+let countsTimer = null;
+function scheduleCounts() {
+  if (countsTimer) return;
+  countsTimer = setTimeout(() => {
+    countsTimer = null;
+    const msg = frame(0x1, Buffer.from(JSON.stringify({ t: 'rooms', counts: counts() })));
+    for (const c of clients) if (c.player) c.write(msg);
+  }, 800);
+  countsTimer.unref();
 }
 
+// ---- tiện ích ----
 function cleanName(s) {
   return String(s || '')
     .replace(/[\u0000-\u001f\u007f<>]/g, '')
@@ -304,55 +534,53 @@ function publicPlayer(p) {
   return { id: p.id, name: p.name, look: p.look, x: r2(p.x), z: r2(p.z), ry: r2(p.ry), seat: p.seat };
 }
 
-function removePlayer(p) {
-  players.delete(p.id);
-  dirty.delete(p.id);
-  if (p.seat !== null && seatOwner.get(p.seat) === p.id) seatOwner.delete(p.seat);
-  broadcast({ t: 'leave', id: p.id });
-  sys(`${p.name} đã rời rạp`);
+function canEnter(c, roomId) {
+  return rooms.has(roomId) && c.hasPass(roomId);
 }
 
-// ---- Video ----
-function curTime() {
-  return video.paused ? video.pausedAt : Math.max(0, (now() - video.startedAt) / 1000);
+function enterRoom(c, room) {
+  const p = c.player;
+  const lay = room.layout;
+  p.room = room;
+  p.seat = null;
+  p.vx = p.vz = 0;
+  p.pt = 0;
+  const fixed = lay.resolve(lay.SPAWN.x + (Math.random() - 0.5) * 8, lay.SPAWN.z + Math.random() * 1.5);
+  p.x = fixed.x;
+  p.z = fixed.z;
+  p.px = p.x;
+  p.pz = p.z;
+  p.ry = Math.PI;
+  room.players.set(p.id, p);
+  c.send({
+    t: 'welcome',
+    id: p.id,
+    room: room.id,
+    serverTime: now(),
+    players: [...room.players.values()].map(publicPlayer),
+    video: { ...room.video },
+    queue: room.queue,
+    chat: room.chatLog,
+    passes: c.passList(),
+    counts: counts(),
+    ball: room.ball ? { b: room.ball.state(), top: room.ball.top() } : null,
+  });
+  room.broadcast({ t: 'join', player: publicPlayer(p) }, p.id);
+  room.sys(room.kind === 'arcade' ? `${p.name} vừa vào khu giải trí` : `${p.name} vừa vào rạp`);
+  scheduleCounts();
 }
-function loadVideo(id, title, by, t = 0) {
-  video.id = id;
-  video.title = title || '';
-  video.by = by || '';
-  video.serial++;
-  video.rev++;
-  video.paused = false;
-  video.pausedAt = t;
-  video.startedAt = now() - t * 1000;
-}
-function clearVideo() {
-  video.id = null;
-  video.title = '';
-  video.by = '';
-  video.serial++;
-  video.rev++;
-  video.paused = true;
-  video.pausedAt = 0;
-  video.startedAt = 0;
-}
-function pushVideo() {
-  broadcast({ t: 'video', video: { ...video } });
-}
-function pushQueue() {
-  broadcast({ t: 'queue', queue });
-}
-function advance() {
-  const nx = queue.shift();
-  if (nx) {
-    loadVideo(nx.id, nx.title, nx.by, 0);
-    sys(`Tiếp theo: ${nx.title || nx.id}`);
-  } else {
-    clearVideo();
-    sys('Hết hàng chờ - màn hình đã tắt');
-  }
-  pushVideo();
-  pushQueue();
+
+function leaveRoom(p, announce) {
+  const room = p.room;
+  if (!room) return;
+  room.players.delete(p.id);
+  room.dirty.delete(p.id);
+  if (p.seat !== null && room.seatOwner.get(p.seat) === p.id) room.seatOwner.delete(p.seat);
+  p.seat = null;
+  room.broadcast({ t: 'leave', id: p.id });
+  if (announce) room.sys(`${p.name} đã rời ${room.kind === 'arcade' ? 'khu giải trí' : 'rạp'}`);
+  p.room = null;
+  scheduleCounts();
 }
 
 // ======================= Xử lý tin nhắn =======================
@@ -361,83 +589,107 @@ function handle(c, msg) {
 
   if (msg.t === 'join') {
     if (c.player) return;
+    if (Array.isArray(msg.tokens)) for (const tk of msg.tokens.slice(0, 8)) c.addToken(tk);
     const id = nextId++;
-    const name = cleanName(msg.name) || 'Khách ' + id;
     const p = {
       id,
-      name,
+      name: cleanName(msg.name) || 'Khách ' + id,
       look: cleanLook(msg.look),
-      x: L.SPAWN.x + (Math.random() - 0.5) * 8,
-      z: L.SPAWN.z + Math.random() * 1.5,
-      ry: Math.PI,
-      seat: null,
+      x: 0, z: 0, ry: Math.PI, seat: null, room: null,
+      vx: 0, vz: 0, px: 0, pz: 0, pt: 0,
+      client: c,
     };
-    const fixed = L.resolve(p.x, p.z);
-    p.x = fixed.x;
-    p.z = fixed.z;
-    p.client = c;
     c.player = p;
-    players.set(id, p);
-    c.send({
-      t: 'welcome',
-      id,
-      serverTime: now(),
-      players: [...players.values()].map(publicPlayer),
-      video: { ...video },
-      queue,
-      chat: chatLog,
-    });
-    broadcast({ t: 'join', player: publicPlayer(p) }, id);
-    sys(`${name} vừa vào rạp`);
+    let target = typeof msg.room === 'string' && rooms.has(msg.room) ? msg.room : 'std';
+    if (!canEnter(c, target)) {
+      c.send({ t: 'err', text: 'Phòng này cần vé. Bạn đã được đưa về Rạp Tiêu Chuẩn.', need: target });
+      target = 'std';
+    }
+    enterRoom(c, rooms.get(target));
     return;
   }
 
   const p = c.player;
-  if (!p) return;
+  if (!p || !p.room) return;
+  const room = p.room;
 
   switch (msg.t) {
+    case 'room': {
+      if (!c.allow('room', 800)) return;
+      const target = typeof msg.room === 'string' ? rooms.get(msg.room) : null;
+      if (!target || target === room) return;
+      if (!canEnter(c, target.id)) {
+        return c.send({ t: 'err', text: `Bạn cần mua vé để vào ${target.def.name}.`, need: target.id });
+      }
+      leaveRoom(p, true);
+      enterRoom(c, target);
+      return;
+    }
+
+    case 'pass': {
+      if (!c.allow('pass', 500)) return;
+      if (!c.addToken(msg.token)) return c.send({ t: 'err', text: 'Vé không hợp lệ hoặc đã hết hạn.' });
+      c.send({ t: 'passes', passes: c.passList() });
+      return;
+    }
+
     case 'move': {
       if (p.seat !== null) return;
       const x = num(msg.x);
       const z = num(msg.z);
       const ry = num(msg.ry);
       if (x === null || z === null || ry === null) return;
-      p.x = L.clamp(x, L.BOUNDS.minX, L.BOUNDS.maxX);
-      p.z = L.clamp(z, L.BOUNDS.minZ, L.BOUNDS.maxZ);
+      const B = room.layout.BOUNDS;
+      const nx = L.clamp(x, B.minX, B.maxX);
+      const nz = L.clamp(z, B.minZ, B.maxZ);
+      const t = now();
+      if (p.pt && t - p.pt >= 25) {
+        const dt = (t - p.pt) / 1000;
+        const vx = (nx - p.x) / dt;
+        const vz = (nz - p.z) / dt;
+        const sp = Math.hypot(vx, vz);
+        const k = sp > 9 ? 9 / sp : 1; // giới hạn chống gian lận tốc độ
+        p.vx = p.vx * 0.4 + vx * k * 0.6;
+        p.vz = p.vz * 0.4 + vz * k * 0.6;
+        p.pt = t;
+      } else if (!p.pt) p.pt = t;
+      p.x = nx;
+      p.z = nz;
       p.ry = ry;
-      dirty.add(p.id);
+      room.dirty.add(p.id);
       return;
     }
 
     case 'sit': {
+      if (room.kind !== 'theater') return;
       if (!c.allow('sit', 250)) return;
       const i = msg.seat;
       if (!Number.isInteger(i) || i < 0 || i >= L.SEATS.length) return;
-      const owner = seatOwner.get(i);
+      const owner = room.seatOwner.get(i);
       if (owner !== undefined && owner !== p.id) {
         return c.send({ t: 'err', text: 'Ghế này đã có người ngồi rồi.' });
       }
-      if (p.seat !== null) seatOwner.delete(p.seat);
+      if (p.seat !== null) room.seatOwner.delete(p.seat);
       const s = L.SEATS[i];
       p.seat = i;
-      seatOwner.set(i, p.id);
+      room.seatOwner.set(i, p.id);
       p.x = s.x;
       p.z = s.z;
       p.ry = s.ry;
-      dirty.delete(p.id);
-      broadcast({ t: 'sit', id: p.id, seat: i, x: s.x, z: s.z, ry: s.ry });
+      room.dirty.delete(p.id);
+      room.broadcast({ t: 'sit', id: p.id, seat: i, x: s.x, z: s.z, ry: s.ry });
       return;
     }
 
     case 'stand': {
       if (p.seat === null) return;
       const s = L.SEATS[p.seat];
-      seatOwner.delete(p.seat);
+      room.seatOwner.delete(p.seat);
       p.seat = null;
       const sp = L.standPos(s);
       p.x = sp.x;
       p.z = sp.z;
-      broadcast({ t: 'stand', id: p.id, x: r2(sp.x), z: r2(sp.z) });
+      room.broadcast({ t: 'stand', id: p.id, x: r2(sp.x), z: r2(sp.z) });
       return;
     }
 
@@ -446,110 +698,157 @@ function handle(c, msg) {
       if (!text) return;
       if (!c.allow('chat', 600)) return c.send({ t: 'err', text: 'Bạn nhắn nhanh quá, chậm lại một chút nhé.' });
       const m = { t: 'chat', id: p.id, name: p.name, text, ts: now() };
-      chatLog.push(m);
-      if (chatLog.length > CHAT_HISTORY) chatLog.shift();
-      broadcast(m);
+      room.chatLog.push(m);
+      if (room.chatLog.length > CHAT_HISTORY) room.chatLog.shift();
+      room.broadcast(m);
       return;
     }
 
     case 'emote': {
       if (!EMOTES.has(msg.e) || !c.allow('emote', 400)) return;
-      broadcast({ t: 'emote', id: p.id, e: msg.e });
+      room.broadcast({ t: 'emote', id: p.id, e: msg.e });
+      return;
+    }
+
+    case 'score': {
+      const name = GAMES[msg.game];
+      const sc = num(msg.score);
+      if (!name || sc === null || sc < 1 || sc > 9999 || !c.allow('score', 4000)) return;
+      room.sys(`${p.name} đạt ${Math.floor(sc)} điểm ở ${name}`);
       return;
     }
 
     // ---- điều khiển video (ai trong phòng cũng điều khiển được) ----
     case 'v_load': {
+      if (room.kind !== 'theater') return;
       const id = typeof msg.id === 'string' && /^[\w-]{11}$/.test(msg.id) ? msg.id : null;
       if (!id || !c.allow(msg.t, 800)) return;
       const t0 = Math.max(0, Math.min(num(msg.time) || 0, 86400));
       const title = cleanText(msg.title, 120);
-      loadVideo(id, title, p.name, t0);
-      pushVideo();
-      sys(`${p.name} chiếu: ${title || id}`);
+      room.loadVideo(id, title, p.name, t0);
+      room.pushVideo();
+      room.sys(`${p.name} chiếu: ${title || id}`);
       return;
     }
     case 'v_pause': {
-      if (!video.id || video.paused || !c.allow(msg.t, 300)) return;
-      video.pausedAt = curTime();
-      video.paused = true;
-      video.rev++;
-      pushVideo();
+      const v = room.video;
+      if (!v.id || v.paused || !c.allow(msg.t, 300)) return;
+      v.pausedAt = room.curTime();
+      v.paused = true;
+      v.rev++;
+      room.pushVideo();
       return;
     }
     case 'v_play': {
-      if (!video.id || !video.paused || !c.allow(msg.t, 300)) return;
-      video.paused = false;
-      video.startedAt = now() - video.pausedAt * 1000;
-      video.rev++;
-      pushVideo();
+      const v = room.video;
+      if (!v.id || !v.paused || !c.allow(msg.t, 300)) return;
+      v.paused = false;
+      v.startedAt = now() - v.pausedAt * 1000;
+      v.rev++;
+      room.pushVideo();
       return;
     }
     case 'v_seek': {
+      const v = room.video;
       const t = num(msg.time);
-      if (!video.id || t === null || !c.allow(msg.t, 200)) return;
+      if (!v.id || t === null || !c.allow(msg.t, 200)) return;
       const tt = Math.max(0, Math.min(t, 86400));
-      if (video.paused) video.pausedAt = tt;
-      else video.startedAt = now() - tt * 1000;
-      video.rev++;
-      pushVideo();
+      if (v.paused) v.pausedAt = tt;
+      else v.startedAt = now() - tt * 1000;
+      v.rev++;
+      room.pushVideo();
       return;
     }
     case 'v_next': {
-      if (!video.id || !c.allow(msg.t, 800)) return;
-      sys(`${p.name} đã chuyển video`);
-      advance();
+      if (!room.video.id || !c.allow(msg.t, 800)) return;
+      room.sys(`${p.name} đã chuyển video`);
+      room.advance();
       return;
     }
     case 'v_end': {
       // nhiều người cùng báo video đã hết; chỉ người đầu tiên (đúng serial) có tác dụng
-      if (!video.id || msg.serial !== video.serial) return;
-      advance();
+      if (!room.video.id || msg.serial !== room.video.serial) return;
+      room.advance();
       return;
     }
 
     case 'q_add': {
+      if (room.kind !== 'theater') return;
       const id = typeof msg.id === 'string' && /^[\w-]{11}$/.test(msg.id) ? msg.id : null;
       if (!id || !c.allow(msg.t, 700)) return;
-      if (queue.length >= MAX_QUEUE) return c.send({ t: 'err', text: 'Hàng chờ đã đầy.' });
+      if (room.queue.length >= MAX_QUEUE) return c.send({ t: 'err', text: 'Hàng chờ đã đầy.' });
       const title = cleanText(msg.title, 120);
-      queue.push({ qid: nextQid++, id, title, by: p.name });
-      if (!video.id) advance();
-      else pushQueue();
-      sys(`${p.name} thêm vào hàng chờ: ${title || id}`);
+      room.queue.push({ qid: room.nextQid++, id, title, by: p.name });
+      if (!room.video.id) room.advance();
+      else room.pushQueue();
+      room.sys(`${p.name} thêm vào hàng chờ: ${title || id}`);
       return;
     }
     case 'q_remove': {
-      const before = queue.length;
-      queue = queue.filter((q) => q.qid !== msg.qid);
-      if (queue.length !== before) pushQueue();
+      const before = room.queue.length;
+      room.queue = room.queue.filter((q) => q.qid !== msg.qid);
+      if (room.queue.length !== before) room.pushQueue();
       return;
     }
     case 'q_play': {
       if (!c.allow(msg.t, 800)) return;
-      const idx = queue.findIndex((q) => q.qid === msg.qid);
+      const idx = room.queue.findIndex((q) => q.qid === msg.qid);
       if (idx < 0) return;
-      const [q] = queue.splice(idx, 1);
-      loadVideo(q.id, q.title, q.by, 0);
-      pushVideo();
-      pushQueue();
-      sys(`${p.name} chiếu: ${q.title || q.id}`);
+      const [q] = room.queue.splice(idx, 1);
+      room.loadVideo(q.id, q.title, q.by, 0);
+      room.pushVideo();
+      room.pushQueue();
+      room.sys(`${p.name} chiếu: ${q.title || q.id}`);
       return;
     }
   }
 }
 
-// Gửi vị trí gộp 10 lần/giây
+// Gửi vị trí gộp 10 lần/giây cho từng phòng
 setInterval(() => {
-  if (!dirty.size) return;
-  const list = [];
-  for (const id of dirty) {
-    const p = players.get(id);
-    if (p) list.push([id, r2(p.x), r2(p.z), r2(p.ry)]);
+  for (const room of rooms.values()) {
+    if (!room.dirty.size) continue;
+    const list = [];
+    for (const id of room.dirty) {
+      const p = room.players.get(id);
+      if (p) list.push([id, r2(p.x), r2(p.z), r2(p.ry)]);
+    }
+    room.dirty.clear();
+    if (list.length) room.broadcast({ t: 's', p: list });
   }
-  dirty.clear();
-  if (list.length) broadcast({ t: 's', p: list });
 }, 100);
+
+// Vật lý bóng đá: 25 lần/giây khi có người trong sân
+const BALL_DT = 0.04;
+let lastBall = now();
+function tickBalls() {
+  const t = now();
+  const dt = Math.min((t - lastBall) / 1000, 0.1);
+  lastBall = t;
+  for (const room of rooms.values()) {
+    if (!room.ball || !room.players.size) continue;
+    const list = [];
+    for (const p of room.players.values()) {
+      const fresh = t - p.pt < 220;
+      list.push({ id: p.id, name: p.name, x: p.x, z: p.z, vx: fresh ? p.vx : 0, vz: fresh ? p.vz : 0 });
+    }
+    const ev = room.ball.step(dt, list);
+    for (const e of ev) {
+      if (e.type === 'goal') {
+        room.broadcast({ t: 'goal', by: e.by, side: e.side, top: room.ball.top() });
+        room.sys(`Bàn thắng! ${e.by} vừa ghi bàn.`);
+      }
+    }
+    const mv = room.ball.moving;
+    if (mv || room.ballWasMoving || room.ball.dirty || ev.length) {
+      room.broadcast({ t: 'ball', b: room.ball.state(), frozen: room.ball.frozen > 0 });
+    }
+    room.ballWasMoving = mv;
+    room.ball.dirty = false;
+  }
+}
+const ballTimer = setInterval(tickBalls, BALL_DT * 1000);
+ballTimer.unref();
 
 // Kiểm tra kết nối còn sống
 setInterval(() => {
@@ -573,7 +872,9 @@ if (require.main === module) {
         if (n.family === 'IPv4' && !n.internal) console.log(`   Cùng Wi-Fi:  http://${n.address}:${PORT}`);
       }
     }
-    console.log('\n   Muốn bạn bè ngoài mạng vào chơi: xem README (ngrok / cloudflared / deploy).\n');
+    console.log(`\n   Trang quản trị xác nhận thanh toán: http://localhost:${PORT}/admin.html`);
+    console.log(`   Nhận tiền vào: ${payments.cfg.bank.name} · ${payments.cfg.bank.account} · ${payments.cfg.bank.holder}`);
+    console.log(`   Xác nhận tự động (webhook): ${payments.cfg.webhookKey ? 'BẬT' : 'tắt - xác nhận thủ công ở trang quản trị'}\n`);
   });
   const stop = () => {
     for (const c of clients) c.close(1001);
@@ -584,4 +885,4 @@ if (require.main === module) {
   process.on('SIGTERM', stop);
 }
 
-module.exports = { httpServer, players, video, getQueue: () => queue };
+module.exports = { httpServer, rooms, payments, tickBalls };
