@@ -36,7 +36,7 @@ class Bot {
   }
   async join(look) {
     await this.opened;
-    this.send({ t: 'join', name: this.name, look });
+    this.send({ t: 'join', name: this.name, look, room: 'cinema' });
     const w = await this.waitFor('welcome');
     this.id = w.id;
     return w;

@@ -12,6 +12,9 @@ const path = require('path');
 const crypto = require('crypto');
 const L = require('./public/layout.js');
 const { createPayments } = require('./payments.js');
+const { createStore } = require('./store.js');
+const { createWallet } = require('./wallet.js');
+const CAT = require('./public/catalog.js');
 const { Football } = require('./football.js');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -20,10 +23,25 @@ const MAX_PAYLOAD = 16 * 1024;
 const MAX_CLIENTS = Number(process.env.MAX_CLIENTS) || 200;
 const MAX_QUEUE = 30;
 const CHAT_HISTORY = 40;
-const EMOTES = new Set(['wave', 'clap', 'heart', 'laugh', 'wow', 'popcorn', 'thumb']);
+const EMOTES = new Set(['wave', 'clap', 'heart', 'laugh', 'wow', 'popcorn', 'thumb', 'dance', 'phone']);
 const GAMES = { claw: 'Gắp thú', mole: 'Đập chuột chũi' };
 
-const payments = createPayments();
+const { createFirebaseAuth } = require('./fbauth.js');
+const fbauth = createFirebaseAuth();
+const accounts = new Map(); // uid -> Client đang đăng nhập
+// Ông chủ cửa hàng: danh sách UID Firebase (cách nhau bởi dấu phẩy) trong biến môi trường ADMIN_UIDS
+const ADMIN_UIDS = new Set(String(process.env.ADMIN_UIDS || '').split(',').map((x) => x.trim()).filter(Boolean));
+const store = createStore();
+if (store.mode === 'file') console.warn('[cảnh báo] Chưa có FIREBASE_SERVICE_ACCOUNT: ví xu và đồ đã mua chỉ lưu tạm trong file, sẽ MẤT khi Render khởi động lại. Xem README để bật lưu bền.');
+const wallet = createWallet(store, { isAdmin: (uid) => ADMIN_UIDS.has(uid) });
+const payments = createPayments(process.env, {
+  store,
+  wallet,
+  onCredit: (uid, w) => {
+    const c = accounts.get(uid);
+    if (c && c.alive) { c.send({ t: 'wallet', w, toast: 'Nạp xu thành công!' }); }
+  },
+});
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -35,6 +53,7 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
+  '.glb': 'model/gltf-binary',
 };
 
 const now = () => Date.now();
@@ -102,7 +121,7 @@ async function handleApi(req, res, url) {
   if (p === '/api/webhook' && req.method === 'POST') {
     const body = await readJson(req, 64 * 1024);
     const q = Object.fromEntries(url.searchParams);
-    const r = payments.handleWebhook(req.headers, q, body);
+    const r = await payments.handleWebhook(req.headers, q, body);
     if (r.json && r.json.confirmed) console.log(`[thanh toán] webhook xác nhận ${r.json.confirmed} đơn`);
     return sendJson(res, r.status, r.json);
   }
@@ -116,9 +135,9 @@ async function handleApi(req, res, url) {
     }
     if (p === '/api/admin/confirm' && req.method === 'POST') {
       const body = await readJson(req);
-      const r = payments.adminConfirm(key, body && body.code);
+      const r = await payments.adminConfirm(key, body && body.code);
       if (!r) return sendJson(res, 401, { error: 'Sai khoá quản trị' });
-      if (r.ok && !r.already) console.log(`[thanh toán] chủ rạp xác nhận đơn ${r.code}`);
+      if (r.ok && !r.already) console.log(`[thanh toán] chủ game xác nhận đơn ${r.code}`);
       return sendJson(res, r.ok ? 200 : 400, r);
     }
     return sendJson(res, 404, { error: 'Không có' });
@@ -132,19 +151,15 @@ async function handleApi(req, res, url) {
     if (rateLimited(ip, 12, 10 * 60000)) return sendJson(res, 429, { error: 'Tạo quá nhiều đơn, thử lại sau ít phút.' });
     const body = await readJson(req);
     if (!body) return sendJson(res, 400, { error: 'Dữ liệu không hợp lệ' });
-    const r = payments.createOrder(String(body.room || ''));
+    const user = await fbauth.verify(String(body.idToken || '')).catch(() => null);
+    if (!user) return sendJson(res, 401, { error: 'Bạn cần đăng nhập để nạp xu.' });
+    const r = await payments.createOrder(user.uid, String(body.pack || ''));
     if (r.error) return sendJson(res, 400, { error: r.error });
     return sendJson(res, 200, r.order);
   }
 
   const m = p.match(/^\/api\/order\/([A-Za-z0-9]{1,20})$/);
-  if (m && req.method === 'GET') return sendJson(res, 200, payments.status(m[1]));
-
-  if (p === '/api/redeem' && req.method === 'POST') {
-    const body = await readJson(req);
-    const v = payments.verifyToken(body && body.token);
-    return v ? sendJson(res, 200, { ok: true, room: v.room, exp: v.exp }) : sendJson(res, 400, { ok: false, error: 'Vé không hợp lệ hoặc đã hết hạn' });
-  }
+  if (m && req.method === 'GET') return sendJson(res, 200, await payments.status(m[1]));
 
   return sendJson(res, 404, { error: 'Không có' });
 }
@@ -193,7 +208,7 @@ const httpServer = http.createServer((req, res) => {
     }
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': filePath.endsWith('.glb') ? 'public, max-age=86400' : 'no-cache',
       'X-Content-Type-Options': 'nosniff',
     });
     fs.createReadStream(filePath).pipe(res);
@@ -263,7 +278,6 @@ class Client {
     this.alive = true;
     this.lastSeen = now();
     this.player = null;
-    this.passes = new Map(); // roomId -> hạn dùng (0 = vĩnh viễn)
     this.rate = {};
     this.msgCount = 0;
     this.msgWindow = now();
@@ -278,27 +292,6 @@ class Client {
     const t = now();
     if (t - (this.rate[key] || 0) < minMs) return false;
     this.rate[key] = t;
-    return true;
-  }
-
-  hasPass(roomId) {
-    const def = L.ROOM_BY_ID[roomId];
-    if (!def) return false;
-    if (def.price <= 0) return true;
-    if (!this.passes.has(roomId)) return false;
-    const exp = this.passes.get(roomId);
-    return exp === 0 || now() < exp;
-  }
-
-  passList() {
-    return [...this.passes.entries()].filter(([r]) => this.hasPass(r)).map(([room, exp]) => ({ room, exp }));
-  }
-
-  addToken(token) {
-    const v = payments.verifyToken(token);
-    if (!v) return false;
-    const old = this.passes.get(v.room);
-    if (old === undefined || old !== 0) this.passes.set(v.room, v.exp === 0 ? 0 : Math.max(old || 0, v.exp));
     return true;
   }
 
@@ -398,6 +391,7 @@ class Client {
     if (!this.alive) return;
     this.alive = false;
     clients.delete(this);
+    if (this.uid && accounts.get(this.uid) === this) accounts.delete(this.uid);
     if (this.player) {
       leaveRoom(this.player, true);
       this.player = null;
@@ -531,12 +525,9 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const r2 = (v) => Math.round(v * 100) / 100;
 
 function publicPlayer(p) {
-  return { id: p.id, name: p.name, look: p.look, x: r2(p.x), z: r2(p.z), ry: r2(p.ry), seat: p.seat };
+  return { id: p.id, name: p.name, v: p.verified ? 1 : 0, own: p.admin ? 1 : 0, o: p.equip || {}, look: p.look, x: r2(p.x), z: r2(p.z), ry: r2(p.ry), seat: p.seat };
 }
 
-function canEnter(c, roomId) {
-  return rooms.has(roomId) && c.hasPass(roomId);
-}
 
 function enterRoom(c, room) {
   const p = c.player;
@@ -561,12 +552,12 @@ function enterRoom(c, room) {
     video: { ...room.video },
     queue: room.queue,
     chat: room.chatLog,
-    passes: c.passList(),
+    w: c.wallet || null,
     counts: counts(),
     ball: room.ball ? { b: room.ball.state(), top: room.ball.top() } : null,
   });
   room.broadcast({ t: 'join', player: publicPlayer(p) }, p.id);
-  room.sys(room.kind === 'arcade' ? `${p.name} vừa vào khu giải trí` : `${p.name} vừa vào rạp`);
+  room.sys(`${p.name} vừa vào ${room.def.name}`);
   scheduleCounts();
 }
 
@@ -578,9 +569,42 @@ function leaveRoom(p, announce) {
   if (p.seat !== null && room.seatOwner.get(p.seat) === p.id) room.seatOwner.delete(p.seat);
   p.seat = null;
   room.broadcast({ t: 'leave', id: p.id });
-  if (announce) room.sys(`${p.name} đã rời ${room.kind === 'arcade' ? 'khu giải trí' : 'rạp'}`);
+  if (announce) room.sys(`${p.name} đã rời ${room.def.name}`);
   p.room = null;
   scheduleCounts();
+}
+
+async function doJoin(c, msg, user) {
+  if (user) {
+    const old = accounts.get(user.uid);
+    if (old && old !== c && old.alive) {
+      old.send({ t: 'err', text: 'Tài khoản này vừa đăng nhập ở nơi khác.' });
+      old.close(4001);
+    }
+    accounts.set(user.uid, c);
+    c.uid = user.uid;
+  }
+  let w = null;
+  if (user) {
+    try { w = await wallet.get(user.uid); } catch (e) { console.error('Lỗi đọc ví:', e.message); }
+    if (!c.alive) return;
+  }
+  c.wallet = w;
+  const id = nextId++;
+  const p = {
+    id,
+    name: (user && cleanName(user.name)) || cleanName(msg.name) || 'Khách ' + id,
+    verified: !!user,
+    look: cleanLook(msg.look),
+    admin: !!(w && w.admin),
+    equip: w ? { ...w.equip } : {},
+    x: 0, z: 0, ry: Math.PI, seat: null, room: null,
+    vx: 0, vz: 0, px: 0, pz: 0, pt: 0,
+    client: c,
+  };
+  c.player = p;
+  const target = typeof msg.room === 'string' && rooms.has(msg.room) ? msg.room : L.DEFAULT_ROOM;
+  enterRoom(c, rooms.get(target));
 }
 
 // ======================= Xử lý tin nhắn =======================
@@ -588,24 +612,16 @@ function handle(c, msg) {
   if (msg.t === 'ping') return c.send({ t: 'pong', t0: num(msg.t0), ts: now() });
 
   if (msg.t === 'join') {
-    if (c.player) return;
-    if (Array.isArray(msg.tokens)) for (const tk of msg.tokens.slice(0, 8)) c.addToken(tk);
-    const id = nextId++;
-    const p = {
-      id,
-      name: cleanName(msg.name) || 'Khách ' + id,
-      look: cleanLook(msg.look),
-      x: 0, z: 0, ry: Math.PI, seat: null, room: null,
-      vx: 0, vz: 0, px: 0, pz: 0, pt: 0,
-      client: c,
-    };
-    c.player = p;
-    let target = typeof msg.room === 'string' && rooms.has(msg.room) ? msg.room : 'std';
-    if (!canEnter(c, target)) {
-      c.send({ t: 'err', text: 'Phòng này cần vé. Bạn đã được đưa về Rạp Tiêu Chuẩn.', need: target });
-      target = 'std';
-    }
-    enterRoom(c, rooms.get(target));
+    if (c.player || c.joining) return;
+    c.joining = true;
+    Promise.resolve(typeof msg.idToken === 'string' && msg.idToken ? fbauth.verify(msg.idToken) : null)
+      .catch(() => null)
+      .then((user) => {
+        c.joining = false;
+        if (!c.alive || c.player) return;
+        if (typeof msg.idToken === 'string' && msg.idToken && !user) c.send({ t: 'err', text: 'Phiên đăng nhập hết hạn, bạn đang chơi như khách. Hãy đăng nhập lại.' });
+        doJoin(c, msg, user);
+      });
     return;
   }
 
@@ -618,18 +634,36 @@ function handle(c, msg) {
       if (!c.allow('room', 800)) return;
       const target = typeof msg.room === 'string' ? rooms.get(msg.room) : null;
       if (!target || target === room) return;
-      if (!canEnter(c, target.id)) {
-        return c.send({ t: 'err', text: `Bạn cần mua vé để vào ${target.def.name}.`, need: target.id });
-      }
       leaveRoom(p, true);
       enterRoom(c, target);
       return;
     }
 
-    case 'pass': {
-      if (!c.allow('pass', 500)) return;
-      if (!c.addToken(msg.token)) return c.send({ t: 'err', text: 'Vé không hợp lệ hoặc đã hết hạn.' });
-      c.send({ t: 'passes', passes: c.passList() });
+    case 'buy': {
+      if (!c.uid) return c.send({ t: 'err', text: 'Bạn cần đăng nhập để mua đồ.' });
+      if (!c.allow('buy', 400)) return;
+      wallet.buy(c.uid, String(msg.item || '')).then((r) => {
+        if (!c.alive) return;
+        if (r.w) { c.wallet = r.w; c.send({ t: 'wallet', w: r.w }); }
+        c.send({ t: 'buyres', ok: r.ok, item: r.item || String(msg.item || ''), error: r.error || '', short: !!r.short });
+      }).catch((e) => { console.error('Lỗi mua:', e.message); c.send({ t: 'err', text: 'Hệ thống đang bận, thử lại sau.' }); });
+      return;
+    }
+
+    case 'equip': {
+      if (!c.uid) return c.send({ t: 'err', text: 'Bạn cần đăng nhập để thay đồ.' });
+      if (!c.allow('equip', 200)) return;
+      const item = msg.item === null ? null : String(msg.item || '');
+      wallet.equip(c.uid, String(msg.slot || ''), item).then((r) => {
+        if (!c.alive) return;
+        if (!r.ok) return c.send({ t: 'err', text: r.error });
+        c.wallet = r.w;
+        c.send({ t: 'wallet', w: r.w });
+        if (p.room) {
+          p.equip = { ...r.w.equip };
+          p.room.broadcast({ t: 'outfit', id: p.id, o: p.equip });
+        }
+      }).catch((e) => { console.error('Lỗi đổi đồ:', e.message); c.send({ t: 'err', text: 'Hệ thống đang bận, thử lại sau.' }); });
       return;
     }
 
@@ -707,6 +741,19 @@ function handle(c, msg) {
     case 'emote': {
       if (!EMOTES.has(msg.e) || !c.allow('emote', 400)) return;
       room.broadcast({ t: 'emote', id: p.id, e: msg.e });
+      return;
+    }
+
+    // ---- voice chat: chuyển tiếp tín hiệu WebRTC giữa hai người cùng phòng ----
+    case 'rtc': {
+      const to = room.players.get(num(msg.to));
+      if (!to || to.id === p.id || !msg.d || typeof msg.d !== 'object') return;
+      const t = now();
+      if (t - (c.rtcWin || 0) > 2000) { c.rtcWin = t; c.rtcN = 0; }
+      if (++c.rtcN > 120) return;
+      const raw = JSON.stringify(msg.d);
+      if (raw.length > 8000) return;
+      to.client.send({ t: 'rtc', from: p.id, d: msg.d });
       return;
     }
 
@@ -885,4 +932,4 @@ if (require.main === module) {
   process.on('SIGTERM', stop);
 }
 
-module.exports = { httpServer, rooms, payments, tickBalls };
+module.exports = { httpServer, rooms, payments, tickBalls, fbauth, accounts, wallet, store };

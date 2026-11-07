@@ -22,6 +22,21 @@ export const ICONS = {
   enter: '<path d="M10 4.5H6.5A2 2 0 0 0 4.5 6.5v11a2 2 0 0 0 2 2H10M9.5 12h10m0 0-3.6-3.6M19.5 12l-3.6 3.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.8"/>',
 
+  // ----- cửa hàng thời trang -----
+  shirt: '<path d="M8.6 3.5 3 6.4a1 1 0 0 0-.5 1.2l1.4 3.6a1 1 0 0 0 1.2.6L7 11.3V19.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-8.2l1.9.5a1 1 0 0 0 1.2-.6l1.4-3.6a1 1 0 0 0-.5-1.2L15.4 3.5c-.4 1.5-1.8 2.4-3.4 2.4S9 5 8.6 3.5z"/>',
+  pants: '<path d="M6.5 3.5h11l1 17a.8.8 0 0 1-.8.9h-3.4a.8.8 0 0 1-.8-.7L12 11.4l-1.5 9.3a.8.8 0 0 1-.8.7H6.3a.8.8 0 0 1-.8-.9z"/>',
+  shoe: '<path d="M3 15.5V9.2a1 1 0 0 1 1.5-.8l3.3 1.8c1.2.7 2.5 1.1 3.9 1.1H13c1.6 0 3 .8 3.8 2.1l3.6 1.4a1.5 1.5 0 0 1 1 1.4v.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>',
+  cap: '<path d="M4 15a8 8 0 0 1 16 0z"/><path d="M12 15h10a1 1 0 0 1 0 2H12z" opacity=".75"/><rect x="3" y="15.8" width="18" height="2.2" rx="1.1"/>',
+  glasses: '<circle cx="7" cy="14" r="4" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="17" cy="14" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 13.4c.6-.5 1.4-.5 2 0M3 12.5 4.5 8M21 12.5 19.5 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  crown: '<path d="M3 8.5 7.6 12 12 5l4.4 7L21 8.5l-1.6 9.5a1 1 0 0 1-1 .8H5.6a1 1 0 0 1-1-.8z"/><rect x="5" y="19.6" width="14" height="1.8" rx=".8"/>',
+  scarf: '<path d="M4 8.5C4 6.6 7.5 5 12 5s8 1.6 8 3.5v3c0 1.9-3.5 3.5-8 3.5s-8-1.6-8-3.5z"/><path d="M13 14.5h4.2l.8 6.2a.7.7 0 0 1-.7.8h-3a.7.7 0 0 1-.7-.6z" opacity=".8"/>',
+  wings: '<path d="M12 8c-1-3.2-4.5-5.2-9-4.8.3 4.8 2.2 8 5.4 9.4-1.7.3-3 .9-4 1.8 3 .6 5.4 1.4 7.6 3.1zM12 8c1-3.2 4.5-5.2 9-4.8-.3 4.8-2.2 8-5.4 9.4 1.7.3 3 .9 4 1.8-3 .6-5.4 1.4-7.6 3.1z"/>',
+  coin: '<circle cx="12" cy="12" r="9.2"/><circle cx="12" cy="12" r="6.6" fill="none" stroke="#0d0710" stroke-opacity=".35" stroke-width="1.4"/><path d="M12.4 7.2v9.6M9.8 9.4c.4-1.3 4.6-1.6 4.6.3 0 2-4.8 1-4.8 3.1 0 1.8 4.2 1.8 4.9.2" fill="none" stroke="#0d0710" stroke-opacity=".55" stroke-width="1.5" stroke-linecap="round"/>',
+  store: '<path d="M3.5 9.5 5 4.5h14l1.5 5z"/><path d="M4.5 11h15v8.5a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1z" opacity=".9"/><path d="M3.5 9.5a2.6 2.6 0 0 0 5 0 2.6 2.6 0 0 0 5 0 2.6 2.6 0 0 0 5 0 2.6 2.6 0 0 0 2 1" fill="none" stroke="#0d0710" stroke-opacity=".3" stroke-width="1.2"/><rect x="9.5" y="14" width="5" height="6.5" rx=".8" fill="#0d0710" fill-opacity=".35"/>',
+  hanger: '<path d="M12 7.2V6a2 2 0 1 1 2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m12 8.5 9.2 7a1 1 0 0 1-.6 1.8H3.4a1 1 0 0 1-.6-1.8z"/>',
+  sparkle: '<path d="M12 2.5c.6 4.6 2.9 6.9 7.5 7.5-4.6.6-6.9 2.9-7.5 7.5-.6-4.6-2.9-6.9-7.5-7.5 4.6-.6 6.9-2.9 7.5-7.5zM19 15.5c.3 2 1.2 3 3 3.3-1.8.3-2.7 1.3-3 3.2-.3-1.9-1.2-2.9-3-3.2 1.8-.3 2.7-1.3 3-3.3z"/>',
+  globe: '<circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M2.8 12h18.4M12 2.8c3 2.8 3 15.6 0 18.4M12 2.8c-3 2.8-3 15.6 0 18.4" fill="none" stroke="currentColor" stroke-width="1.7"/>',
+
   // ----- biểu cảm -----
   wave:
     '<rect x="6.4" y="10" width="11.6" height="10.5" rx="4.6"/>' +
@@ -60,6 +75,10 @@ Object.assign(ICONS, {
   crown: '<path d="m3 8 4.4 3.6L12 4.5l4.6 7.1L21 8l-1.7 10.5H4.7z"/><rect x="4.6" y="19.4" width="14.8" height="1.8" rx=".9"/>',
   ball: '<circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m12 7.2 4 2.9-1.5 4.7h-5L8 10.1z"/><path d="M12 7.2V3M16 10.1l4-1.3M14.5 14.8l2.5 3.6M9.5 14.8l-2.5 3.6M8 10.1 4 8.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
   hand: '<path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-1V4a1.5 1.5 0 0 1 3 0v7m0-5.5a1.5 1.5 0 0 1 3 0V13m0-4.3a1.5 1.5 0 0 1 3 0V15c0 4-2.5 6.5-6.3 6.5-2.6 0-4-1-5.4-3.2L4.200 13.300a1.500 1.500 0 0 1 2.500-1.600L8 13.500" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+  dance: '<circle cx="13.5" cy="4.5" r="2.2"/><path d="M10.5 9.5 13 8.2l3.2 2.5 3.6-1.6.7 1.6-4.4 2.1-2-1.6-.9 3.1 2.7 3.2-.7 5.3-1.9-.2-.5-4.7-2.8-2.9-2 4.6-1.8-.8 2.8-6.3z"/>',
+  phone: '<path d="M7.2 2.8h9.6A1.7 1.7 0 0 1 18.5 4.5v15A1.7 1.7 0 0 1 16.8 21.2H7.2A1.7 1.7 0 0 1 5.5 19.5v-15A1.7 1.7 0 0 1 7.2 2.8z"/><circle cx="12" cy="18" r="1" fill="#000" fill-opacity=".5"/><rect x="8" y="5.4" width="8" height="10" rx=".8" fill="#000" fill-opacity=".35"/>',
+  mic: '<rect x="8.5" y="2.5" width="7" height="12" rx="3.5"/><path d="M5 11.5a7 7 0 0 0 14 0M12 18.5V22M8.5 22h7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
+  micoff: '<rect x="8.5" y="2.5" width="7" height="12" rx="3.5" opacity=".55"/><path d="M5 11.5a7 7 0 0 0 11.2 5.6M19 11.5M12 18.5V22M8.5 22h7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" opacity=".55"/><path d="M3.5 3.5l17 17" stroke="#ff6b81" stroke-width="2.4" stroke-linecap="round"/>',
   more: '<circle cx="5.5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18.5" cy="12" r="1.8"/>',
 });
 
@@ -71,6 +90,8 @@ export const EMOTE_META = [
   { key: 'wow', label: 'Wow', icon: 'wow', color: '#5fb4ff' },
   { key: 'popcorn', label: 'Bắp rang', icon: 'popcorn', color: '#ff8a4c' },
   { key: 'thumb', label: 'Tuyệt', icon: 'thumb', color: '#3fd6c0' },
+  { key: 'dance', label: 'Nhảy', icon: 'dance', color: '#c07bff' },
+  { key: 'phone', label: 'Gọi điện', icon: 'phone', color: '#6bd6ff' },
 ];
 
 /** Thẻ <svg> dùng symbol đã nạp bằng injectSprite() */

@@ -1,34 +1,21 @@
 'use strict';
 /*
- * Thanh toán vé phòng bằng chuyển khoản VietQR.
+ * Nạp xu bằng chuyển khoản VietQR.
  *
  * Luồng:
- *   1. Người chơi chọn phòng trả phí -> server tạo "đơn" với mã nội dung chuyển khoản, ví dụ RAPG7K2QM
- *      (chữ cái thứ 4 cho biết cấp phòng: S=Bạc, G=Vàng, V=Kim Cương).
+ *   1. Người chơi ĐÃ ĐĂNG NHẬP chọn gói nạp -> server tạo "đơn" gắn với tài khoản, kèm mã nội dung chuyển khoản, ví dụ RAPK7M2QX.
  *   2. Người chơi quét QR / chuyển khoản đúng số tiền, đúng nội dung.
- *   3. Tiền được XÁC NHẬN bởi server theo một trong hai cách (không bao giờ tin client):
+ *   3. Tiền được XÁC NHẬN bởi server (không bao giờ tin client):
  *        a) Tự động: dịch vụ báo biến động số dư (SePay, Casso...) gọi webhook POST /api/webhook.
- *        b) Thủ công: chủ rạp mở /admin.html, đối chiếu app ngân hàng rồi bấm "Xác nhận".
- *   4. Server cấp "vé" là một chuỗi ký HMAC (có hạn dùng). Vé lưu ở trình duyệt người chơi và
- *      được kiểm tra lại mỗi lần vào phòng => không cần database, khởi động lại server vẫn còn vé
- *      miễn là biến môi trường SECRET không đổi.
+ *        b) Thủ công: chủ game mở /admin.html, đối chiếu app ngân hàng rồi bấm "Xác nhận".
+ *   4. Khi xác nhận, số xu được cộng thẳng vào ví của tài khoản đó (lưu bền trong kho dữ liệu, xem store.js).
  */
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const L = require('./public/layout.js');
+const C = require('./public/catalog.js');
 
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // bỏ I, L, O, 0, 1 cho dễ đọc
-const LETTER_OF = { silver: 'S', gold: 'G', vip: 'V' };
-const ROOM_OF = { S: 'silver', G: 'gold', V: 'vip' };
-const CODE_RE = /RAP([SGV])([A-HJ-NP-Z2-9]{5})/;
+const CODE_RE = /RAP([A-HJ-NP-Z2-9]{6})/;
 
-function b64u(buf) {
-  return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-function fromB64u(s) {
-  return Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-}
 function safeEqual(a, b) {
   const x = Buffer.from(String(a));
   const y = Buffer.from(String(b));
@@ -37,6 +24,9 @@ function safeEqual(a, b) {
 
 function createPayments(env = process.env, opts = {}) {
   const warn = opts.warn || ((m) => console.warn(m));
+  const store = opts.store;
+  const wallet = opts.wallet;
+  const onCredit = opts.onCredit || (() => {});
   const cfg = {
     bank: {
       bin: env.BANK_BIN || '970436', // Vietcombank
@@ -44,16 +34,8 @@ function createPayments(env = process.env, opts = {}) {
       account: env.BANK_ACCOUNT || '1054794616',
       holder: env.BANK_HOLDER || 'PHAM DUC MANH',
     },
-    passDays: env.PASS_DAYS !== undefined && env.PASS_DAYS !== '' ? Math.max(0, Number(env.PASS_DAYS) || 0) : 30,
     webhookKey: env.PAYMENT_WEBHOOK_KEY || '',
-    dataDir: env.DATA_DIR || path.join(__dirname, 'data'),
   };
-
-  let secret = env.SECRET || '';
-  if (!secret) {
-    secret = crypto.randomBytes(32).toString('hex');
-    warn('[cảnh báo] Chưa đặt biến môi trường SECRET: vé đã bán sẽ mất hiệu lực mỗi lần server khởi động lại. Hãy đặt SECRET là một chuỗi ngẫu nhiên dài.');
-  }
   let adminKey = env.ADMIN_KEY || '';
   let adminKeyGenerated = false;
   if (!adminKey) {
@@ -62,111 +44,75 @@ function createPayments(env = process.env, opts = {}) {
     warn(`[cảnh báo] Chưa đặt ADMIN_KEY. Khoá quản trị tạm thời của lần chạy này: ${adminKey}`);
   }
 
-  const pending = new Map(); // code -> {code, room, amount, createdAt}
-  const paid = new Map(); // code -> {code, room, amount, paidAt, source, txid}
+  const recent = new Map(); // code -> đơn (chỉ các đơn của lần chạy này, để chủ game xem)
   const seenTx = new Set();
-  const MAX_PENDING = 2000;
-
-  // ---- lưu danh sách đơn đã thanh toán (để chủ rạp tra cứu; vé không phụ thuộc file này) ----
-  const file = path.join(cfg.dataDir, 'orders.json');
-  try {
-    const old = JSON.parse(fs.readFileSync(file, 'utf8'));
-    for (const o of old.paid || []) paid.set(o.code, o);
-  } catch {}
-  let saveTimer = null;
-  function save() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      try {
-        fs.mkdirSync(cfg.dataDir, { recursive: true });
-        fs.writeFileSync(file, JSON.stringify({ paid: [...paid.values()] }, null, 1));
-      } catch {}
-    }, 200);
-    if (saveTimer.unref) saveTimer.unref();
-  }
-
-  // ---- vé ----
-  function signToken(payload) {
-    const body = b64u(JSON.stringify(payload));
-    const sig = b64u(crypto.createHmac('sha256', secret).update(body).digest());
-    return body + '.' + sig;
-  }
-  function issueToken(room, code) {
-    const e = cfg.passDays > 0 ? Date.now() + cfg.passDays * 86400000 : 0;
-    return signToken({ r: room, e, c: code });
-  }
-  /** Trả về {room, exp, code} nếu vé hợp lệ và còn hạn, ngược lại null. */
-  function verifyToken(token) {
-    if (typeof token !== 'string' || token.length > 400) return null;
-    const i = token.indexOf('.');
-    if (i < 1) return null;
-    const body = token.slice(0, i);
-    const sig = token.slice(i + 1);
-    const good = b64u(crypto.createHmac('sha256', secret).update(body).digest());
-    if (!safeEqual(sig, good)) return null;
-    let p;
-    try { p = JSON.parse(fromB64u(body).toString('utf8')); } catch { return null; }
-    if (!p || !L.ROOM_BY_ID[p.r] || L.ROOM_BY_ID[p.r].price <= 0) return null;
-    if (p.e && Date.now() > p.e) return null;
-    return { room: p.r, exp: p.e || 0, code: p.c };
-  }
-
-  // ---- đơn ----
-  function newCode(room) {
-    for (let k = 0; k < 20; k++) {
-      let s = '';
-      const rnd = crypto.randomBytes(5);
-      for (let i = 0; i < 5; i++) s += ALPHABET[rnd[i] % ALPHABET.length];
-      const code = 'RAP' + LETTER_OF[room] + s;
-      if (!pending.has(code) && !paid.has(code)) return code;
-    }
-    throw new Error('Không tạo được mã');
-  }
-
-  function createOrder(roomId) {
-    const room = L.ROOM_BY_ID[roomId];
-    if (!room || !(room.price > 0)) return { error: 'Phòng này miễn phí, không cần mua vé.' };
-    if (pending.size >= MAX_PENDING) {
-      // dọn đơn cũ nhất
-      const oldest = [...pending.values()].sort((a, b) => a.createdAt - b.createdAt).slice(0, 200);
-      oldest.forEach((o) => pending.delete(o.code));
-    }
-    const code = newCode(roomId);
-    const order = { code, room: roomId, amount: room.price, createdAt: Date.now() };
-    pending.set(code, order);
-    return { order };
-  }
+  const busy = new Set();
+  const MAX_RECENT = 1000;
 
   function normalizeCode(code) {
     const m = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').match(CODE_RE);
     return m ? m[0] : null;
   }
 
-  /** Đánh dấu đã thanh toán. amount = số tiền thực nhận (VND). */
-  function confirm(rawCode, amount, source, txid) {
-    const code = normalizeCode(rawCode);
-    if (!code) return { ok: false, reason: 'Không thấy mã đơn trong nội dung chuyển khoản' };
-    const room = ROOM_OF[code[3]];
-    const def = L.ROOM_BY_ID[room];
-    if (paid.has(code)) return { ok: true, already: true, code, room };
-    if (txid && seenTx.has(String(txid))) return { ok: true, already: true, code, room };
-    if (!(Number(amount) >= def.price)) {
-      return { ok: false, reason: `Số tiền ${amount} nhỏ hơn giá vé ${def.price}`, code };
+  async function newCode() {
+    for (let k = 0; k < 20; k++) {
+      let s = '';
+      const rnd = crypto.randomBytes(6);
+      for (let i = 0; i < 6; i++) s += ALPHABET[rnd[i] % ALPHABET.length];
+      const code = 'RAP' + s;
+      if (!recent.has(code) && !(await store.get('orders', code))) return code;
     }
-    const rec = { code, room, amount: Number(amount), paidAt: Date.now(), source, txid: txid ? String(txid) : '' };
-    paid.set(code, rec);
-    pending.delete(code);
-    if (txid) seenTx.add(String(txid));
-    save();
-    return { ok: true, code, room };
+    throw new Error('Không tạo được mã');
   }
 
-  function status(rawCode) {
+  async function createOrder(uid, packId) {
+    const pack = C.PACK_BY_ID[packId];
+    if (!pack) return { error: 'Gói nạp không tồn tại.' };
+    if (!uid) return { error: 'Bạn cần đăng nhập để nạp xu.' };
+    const code = await newCode();
+    const order = { code, uid, pack: pack.id, amount: pack.amount, createdAt: Date.now(), paidAt: 0, source: '', txid: '' };
+    await store.set('orders', code, order);
+    if (recent.size >= MAX_RECENT) recent.delete(recent.keys().next().value);
+    recent.set(code, order);
+    return { order: { code, amount: order.amount, pack: pack.id } };
+  }
+
+  async function findOrder(code) {
+    return recent.get(code) || (await store.get('orders', code));
+  }
+
+  /** Đánh dấu đã thanh toán và cộng xu. amount = số tiền thực nhận (VND). */
+  async function confirm(rawCode, amount, source, txid) {
+    const code = normalizeCode(rawCode);
+    if (!code) return { ok: false, reason: 'Không thấy mã đơn trong nội dung chuyển khoản' };
+    if (txid && seenTx.has(String(txid))) return { ok: true, already: true, code };
+    if (busy.has(code)) return { ok: true, already: true, code };
+    busy.add(code);
+    try {
+      const o = await findOrder(code);
+      if (!o) return { ok: false, reason: 'Không có đơn ' + code, code };
+      if (o.paidAt) return { ok: true, already: true, code };
+      if (!(Number(amount) >= o.amount)) return { ok: false, reason: `Số tiền ${amount} nhỏ hơn đơn ${o.amount}`, code };
+      o.paidAt = Date.now();
+      o.source = source;
+      o.txid = txid ? String(txid) : '';
+      await store.set('orders', code, o); // đánh dấu đã trả TRƯỚC khi cộng xu: không bao giờ cộng hai lần
+      if (txid) seenTx.add(String(txid));
+      recent.set(code, o);
+      const w = await wallet.credit(o.uid, o.amount);
+      try { onCredit(o.uid, w, o); } catch {}
+      return { ok: true, code, uid: o.uid, amount: o.amount };
+    } finally {
+      busy.delete(code);
+    }
+  }
+
+  async function status(rawCode) {
     const code = normalizeCode(rawCode);
     if (!code) return { status: 'invalid' };
-    const rec = paid.get(code);
-    if (!rec) return { status: 'pending' };
-    return { status: 'paid', room: rec.room, token: issueToken(rec.room, code) };
+    const o = await findOrder(code);
+    if (!o) return { status: 'invalid' };
+    return { status: o.paidAt ? 'paid' : 'pending', amount: o.amount };
   }
 
   // ---- webhook (SePay / Casso / dịch vụ tương tự) ----
@@ -177,7 +123,7 @@ function createPayments(env = process.env, opts = {}) {
     const cands = [auth.replace(/^(Apikey|Bearer)\s+/i, ''), h['secure-token'], h['x-api-key'], query && query.key];
     return cands.some((c) => c && safeEqual(c, cfg.webhookKey));
   }
-  function handleWebhook(headers, query, body) {
+  async function handleWebhook(headers, query, body) {
     if (!cfg.webhookKey) return { status: 503, json: { success: false, message: 'Webhook chưa được bật (thiếu PAYMENT_WEBHOOK_KEY)' } };
     if (!webhookAuthOk(headers, query)) return { status: 401, json: { success: false, message: 'Sai khoá xác thực' } };
     const txs = [];
@@ -194,7 +140,7 @@ function createPayments(env = process.env, opts = {}) {
     let confirmed = 0;
     for (const t of txs) {
       if (!t.incoming) continue;
-      const r = confirm(t.text, t.amount, 'webhook', t.id);
+      const r = await confirm(t.text, t.amount, 'webhook', t.id);
       if (r.ok && !r.already) confirmed++;
     }
     return { status: 200, json: { success: true, confirmed } };
@@ -204,35 +150,31 @@ function createPayments(env = process.env, opts = {}) {
   const adminOk = (key) => !!key && safeEqual(key, adminKey);
   function adminList(key) {
     if (!adminOk(key)) return null;
+    const all = [...recent.values()];
     return {
-      pending: [...pending.values()].sort((a, b) => b.createdAt - a.createdAt).slice(0, 200),
-      paid: [...paid.values()].sort((a, b) => b.paidAt - a.paidAt).slice(0, 200),
-      total: [...paid.values()].reduce((s, o) => s + o.amount, 0),
+      pending: all.filter((o) => !o.paidAt).sort((a, b) => b.createdAt - a.createdAt).slice(0, 200),
+      paid: all.filter((o) => o.paidAt).sort((a, b) => b.paidAt - a.paidAt).slice(0, 200),
+      total: all.filter((o) => o.paidAt).reduce((s, o) => s + o.amount, 0),
     };
   }
-  function adminConfirm(key, code) {
+  async function adminConfirm(key, code) {
     if (!adminOk(key)) return null;
     const c = normalizeCode(code);
     if (!c) return { ok: false, reason: 'Mã không hợp lệ' };
-    const def = L.ROOM_BY_ID[ROOM_OF[c[3]]];
-    return confirm(c, def.price, 'admin', '');
+    const o = await findOrder(c);
+    if (!o) return { ok: false, reason: 'Không có đơn ' + c };
+    return confirm(c, o.amount, 'admin', '');
   }
 
   function publicConfig() {
-    return {
-      bank: cfg.bank,
-      passDays: cfg.passDays,
-      autoConfirm: !!cfg.webhookKey,
-      rooms: L.ROOMS,
-    };
+    return { bank: cfg.bank, autoConfirm: !!cfg.webhookKey, packs: C.PACKS };
   }
 
   return {
-    cfg, publicConfig, createOrder, status, confirm, verifyToken, issueToken,
+    cfg, publicConfig, createOrder, status, confirm,
     handleWebhook, adminList, adminConfirm, normalizeCode,
     get adminKeyGenerated() { return adminKeyGenerated; },
-    _state: { pending, paid },
   };
 }
 
-module.exports = { createPayments, LETTER_OF, ROOM_OF };
+module.exports = { createPayments };

@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Rạp Chiếu Phim Cộng Đồng</title>
+<title>Phố Vui - Thế giới ảo cộng đồng</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="landing.css">
 <script type="importmap">
 {
   "imports": {
@@ -21,34 +22,95 @@
 <div id="css3d"></div>
 <canvas id="gl"></canvas>
 
-<!-- Màn hình vào phòng -->
-<div id="join" class="overlay">
-  <div class="card">
-    <div class="logo"><svg class="ic" viewBox="0 0 24 24"><use href="#i-film"/></svg></div>
-    <h1>RẠP CHIẾU PHIM<br><span>CỘNG ĐỒNG</span></h1>
-    <p class="sub">Cả phòng cùng xem một màn hình. Dán link YouTube, chọn ghế, trò chuyện.</p>
-    <div class="join-grid">
-      <canvas id="preview" width="240" height="300"></canvas>
-      <div class="form">
-        <label>Tên của bạn
-          <input id="nameInput" maxlength="16" placeholder="Nhập tên…" autocomplete="off">
-        </label>
-        <div class="pick" data-key="shirt"><b>Áo</b><div class="sw"></div></div>
-        <div class="pick" data-key="skin"><b>Da</b><div class="sw"></div></div>
-        <div class="pick" data-key="hair"><b>Tóc</b><div class="sw"></div></div>
-        <div class="pick" data-key="hat"><b>Phụ kiện</b><div class="sw txt"></div></div>
-        <button id="randomBtn" type="button" class="ghost"><svg class="ic" viewBox="0 0 24 24"><use href="#i-shuffle"/></svg>Ngẫu nhiên</button>
-      </div>
-    </div>
-    <button id="enterBtn" type="button" class="primary"><svg class="ic" viewBox="0 0 24 24"><use href="#i-enter"/></svg>Vào rạp</button>
-    <p id="joinStatus" class="status"></p>
-    <p class="hint">Cần kết nối Internet để tải đồ hoạ 3D và YouTube.</p>
+<!-- Màn hình chờ -->
+<div id="join" class="overlay landing">
+  <div class="ld-sky" aria-hidden="true">
+    <div class="ld-sun"></div>
+    <div class="ld-clouds"><i></i><i></i><i></i><i></i></div>
+    <svg id="ldCity" class="ld-city" viewBox="0 0 1600 400" preserveAspectRatio="xMidYMax slice"></svg>
+    <div class="ld-ground"></div>
   </div>
+
+  <header class="ld-nav">
+    <a class="ld-brand" href="#" data-go="top"><span class="ld-logo"><svg class="ic" viewBox="0 0 24 24"><use href="#i-sparkle"/></svg></span><b>PHỐ VUI</b></a>
+    <nav>
+      <a href="#" data-go="top" class="on">Trang chủ</a>
+      <a href="#" data-go="world">Thế giới game</a>
+      <a href="#" data-go="shop">Cửa hàng</a>
+      <a href="#" data-go="help">Hỗ trợ</a>
+    </nav>
+    <span class="ld-lang"><svg class="ic" viewBox="0 0 24 24"><use href="#i-globe"/></svg>Tiếng Việt</span>
+  </header>
+
+  <main class="ld-main">
+    <section class="ld-hero">
+      <div class="ld-copy">
+        <div class="ld-badge">Thế giới ảo cộng đồng</div>
+        <h1>PHỐ VUI</h1>
+        <p class="ld-slogan">Sống theo cách bạn thích: xem phim cùng bạn bè, chơi game, mua sắm thời trang và trò chuyện bằng giọng nói.</p>
+        <div class="ld-cta">
+          <input id="nameInput" maxlength="16" placeholder="Tên của bạn…" autocomplete="off" aria-label="Tên của bạn">
+          <button id="enterBtn" type="button" class="ld-play"><span>Chơi Ngay</span><i>»</i></button>
+        </div>
+        <p class="ld-note" id="guestNote">Chơi khách được ngay. Đăng nhập để lưu ví xu và đồ đã mua.</p>
+      </div>
+      <canvas id="preview" class="ld-aj" width="480" height="600" aria-label="Nhân vật Aj"></canvas>
+    </section>
+
+    <aside class="ld-card" id="ldCard">
+      <div id="authTabs" class="tabs ld-tabs" role="tablist" hidden>
+        <button type="button" data-tab="login" class="on">Đăng nhập</button>
+        <button type="button" data-tab="register">Đăng ký</button>
+      </div>
+
+      <form id="loginForm" class="tabpane" data-pane="login" hidden autocomplete="on">
+        <label>Email<input id="liEmail" type="email" autocomplete="email" inputmode="email" placeholder="ban@email.com"></label>
+        <label>Mật khẩu<input id="liPass" type="password" autocomplete="current-password" placeholder="••••••"></label>
+        <button type="submit" class="primary wide" id="liBtn"><svg class="ic" viewBox="0 0 24 24"><use href="#i-enter"/></svg>Đăng nhập</button>
+        <button type="button" class="linkbtn" id="forgotBtn">Quên mật khẩu?</button>
+      </form>
+
+      <form id="regForm" class="tabpane" data-pane="register" hidden autocomplete="on">
+        <label>Tên hiển thị<input id="rgName" maxlength="16" autocomplete="nickname" placeholder="Tên trong game"></label>
+        <label>Email<input id="rgEmail" type="email" autocomplete="email" inputmode="email" placeholder="ban@email.com"></label>
+        <label>Mật khẩu (ít nhất 6 ký tự)<input id="rgPass" type="password" autocomplete="new-password"></label>
+        <label>Nhập lại mật khẩu<input id="rgPass2" type="password" autocomplete="new-password"></label>
+        <button type="submit" class="primary wide" id="rgBtn">Tạo tài khoản</button>
+      </form>
+
+      <div class="tabpane ld-guest" data-pane="guest">
+        <h3>Chế độ khách</h3>
+        <p>Chủ game chưa bật tài khoản, nên bạn chơi với tên khách ở bên trái. Muốn mua đồ cần có tài khoản.</p>
+      </div>
+
+      <div class="tabpane" data-pane="account" hidden>
+        <div class="acct"><span class="avatar-dot" id="acctInit">?</span><div><b id="acctName">…</b><small id="acctMail"></small></div></div>
+        <button id="enterAcct" type="button" class="primary wide"><svg class="ic" viewBox="0 0 24 24"><use href="#i-enter"/></svg>Vào thế giới</button>
+        <button id="logoutBtn" type="button" class="ghost wide">Đăng xuất</button>
+      </div>
+      <p id="joinStatus" class="status"></p>
+    </aside>
+  </main>
+
+  <section class="ld-tiles" id="ldTiles">
+    <div class="ld-tile t1"><svg class="ic" viewBox="0 0 24 24"><use href="#i-film"/></svg><b>Rạp chiếu phim</b><span>Cả hội xem chung màn hình khổng lồ</span></div>
+    <div class="ld-tile t2" data-go="shop"><svg class="ic" viewBox="0 0 24 24"><use href="#i-shirt"/></svg><b>Mua sắm thời trang</b><span>Áo, quần, giày, phụ kiện thoả sức mix</span></div>
+    <div class="ld-tile t3"><svg class="ic" viewBox="0 0 24 24"><use href="#i-gamepad"/></svg><b>Khu giải trí</b><span>Đá bóng, gắp thú, đập chuột chũi</span></div>
+    <div class="ld-tile t4"><svg class="ic" viewBox="0 0 24 24"><use href="#i-mic"/></svg><b>Chat voice</b><span>Nói chuyện với người đứng gần bạn</span></div>
+    <div class="ld-tile t5"><svg class="ic" viewBox="0 0 24 24"><use href="#i-users"/></svg><b>Kết bạn bốn phương</b><span>Gặp gỡ ở Quảng Trường mỗi ngày</span></div>
+  </section>
+
+  <footer class="ld-foot">
+    <span class="ld-online"><i></i><b id="ldOnline">0</b> người đang online</span>
+    <span class="ld-promo"><svg class="ic" viewBox="0 0 24 24"><use href="#i-coin"/></svg><b>Nạp từ 2.000đ</b> · đổi xu lấy đồ thời trang</span>
+    <small>© Phố Vui · Cần Internet để tải đồ hoạ 3D và YouTube</small>
+  </footer>
 </div>
 
 <!-- HUD -->
 <div id="hud" hidden>
   <div id="topbar">
+    <button type="button" class="pill coin" id="coinPill" aria-label="Ví xu"><svg class="ic" viewBox="0 0 24 24"><use href="#i-coin"/></svg><b id="coinAmt">0</b><span class="plus">+</span></button>
     <div class="pill" id="roomPill"><svg class="ic" viewBox="0 0 24 24"><use href="#i-rooms"/></svg><span id="roomName">Rạp</span></div>
     <div class="pill" id="onlinePill"><svg class="ic" viewBox="0 0 24 24"><use href="#i-users"/></svg><span id="onlineCount">1</span><span class="hide-s"> người</span></div>
     <div class="pill" id="netPill"><span class="dot"></span><span id="netText" class="hide-s">đang kết nối</span></div>
@@ -59,11 +121,17 @@
 
   <!-- Thanh công cụ dọc -->
   <nav id="toolbar" aria-label="Thanh công cụ">
-    <button type="button" data-panel="rooms" aria-label="Chọn rạp"><svg class="ic" viewBox="0 0 24 24"><use href="#i-rooms"/></svg><span>Rạp</span></button>
+    <button type="button" data-panel="rooms" aria-label="Địa điểm"><svg class="ic" viewBox="0 0 24 24"><use href="#i-rooms"/></svg><span>Địa điểm</span></button>
     <button type="button" data-panel="screen" aria-label="Màn hình"><svg class="ic" viewBox="0 0 24 24"><use href="#i-screen"/></svg><span>Màn hình</span></button>
     <button type="button" data-panel="chat" aria-label="Trò chuyện"><svg class="ic" viewBox="0 0 24 24"><use href="#i-chat"/></svg><span>Chat</span><i id="chatBadge" hidden>0</i></button>
     <button type="button" data-panel="emote" aria-label="Biểu cảm"><svg class="ic" viewBox="0 0 24 24"><use href="#i-smile"/></svg><span>Cảm xúc</span></button>
     <button type="button" data-panel="people" aria-label="Người trong phòng"><svg class="ic" viewBox="0 0 24 24"><use href="#i-users"/></svg><span>Mọi người</span></button>
+    <span class="sep"></span>
+    <button type="button" id="wardBtn" aria-label="Tủ đồ"><svg class="ic" viewBox="0 0 24 24"><use href="#i-hanger"/></svg><span>Tủ đồ</span></button>
+    <button type="button" id="topBtn" aria-label="Nạp xu"><svg class="ic" viewBox="0 0 24 24"><use href="#i-coin"/></svg><span>Nạp xu</span></button>
+    <span class="sep"></span>
+    <button type="button" id="micBtn" aria-label="Bật micro" aria-pressed="false"><svg class="ic" viewBox="0 0 24 24"><use id="micIcon" href="#i-micoff"/></svg><span id="micLabel">Mic</span></button>
+    <button type="button" id="spkBtn" aria-label="Bật/tắt loa"><svg class="ic" viewBox="0 0 24 24"><use id="spkIcon" href="#i-volume"/></svg><span>Loa</span></button>
     <span class="sep"></span>
     <button type="button" id="fullBtn" aria-label="Toàn màn hình"><svg class="ic" viewBox="0 0 24 24"><use href="#i-full"/></svg><span>Toàn màn</span></button>
     <button type="button" data-panel="help" aria-label="Hướng dẫn"><svg class="ic" viewBox="0 0 24 24"><use href="#i-help"/></svg><span>Hướng dẫn</span></button>
@@ -78,14 +146,10 @@
 
     <div class="fly" id="fly-rooms" hidden>
       <div id="roomList"></div>
-      <div class="redeem">
-        <label for="ticketInput">Đã có mã vé? Dán vào đây</label>
-        <div class="row"><input id="ticketInput" placeholder="Mã vé…" autocomplete="off"><button id="ticketBtn" type="button" class="ghost small">Dùng</button></div>
-      </div>
     </div>
 
     <div class="fly" id="fly-screen" hidden>
-      <div id="noScreen" class="note" hidden>Khu Giải Trí không có màn hình phim. Về một rạp để xem phim chung.</div>
+      <div id="noScreen" class="note" hidden>Chỗ này không có màn hình phim. Vào Rạp Chiếu Phim để xem chung.</div>
       <div id="screenBody">
         <form id="urlForm">
           <input id="urlInput" placeholder="Dán link YouTube vào đây…" autocomplete="off" inputmode="url">
@@ -138,37 +202,66 @@
   </div>
 </div>
 
-<!-- Cửa hàng vé -->
-<div id="shop" class="overlay" hidden>
-  <div class="card shop-card">
-    <button id="shopClose" type="button" class="icon corner" aria-label="Đóng"><svg class="ic" viewBox="0 0 24 24"><use href="#i-close"/></svg></button>
-    <div class="tier-badge" id="shopBadge"><svg class="ic" viewBox="0 0 24 24"><use href="#i-crown"/></svg></div>
-    <h2 id="shopTitle">Rạp Vàng</h2>
-    <p class="sub" id="shopDesc"></p>
-    <div class="price"><b id="shopPrice">8.000đ</b><span id="shopDays">/ 30 ngày</span></div>
-    <div id="shopStep1">
-      <button id="shopBuy" type="button" class="primary wide"><svg class="ic" viewBox="0 0 24 24"><use href="#i-ticket"/></svg>Mua vé bằng chuyển khoản</button>
+<!-- Nạp xu (bố cục ngang) -->
+<div id="topup" class="overlay" hidden>
+  <div class="card tu-card">
+    <button id="tuClose" type="button" class="icon corner" aria-label="Đóng"><svg class="ic" viewBox="0 0 24 24"><use href="#i-close"/></svg></button>
+    <div class="tu-left">
+      <div class="tu-head"><span class="tu-coin"><svg class="ic" viewBox="0 0 24 24"><use href="#i-coin"/></svg></span><div><h2>Nạp xu</h2><p>1.000đ = 1.000 xu · dùng để mua đồ ở Shop Thời Trang</p></div></div>
+      <div class="tu-balance">Số dư hiện tại <b id="tuBal">0</b> xu</div>
+      <div class="tu-label">Chọn gói nạp</div>
+      <div id="tuPacks" class="tu-packs"></div>
+      <button id="tuCreate" type="button" class="primary wide big"><svg class="ic" viewBox="0 0 24 24"><use href="#i-coin"/></svg>Tạo mã chuyển khoản</button>
+      <p class="tiny" id="tuNote"></p>
     </div>
-    <div id="shopStep2" hidden>
-      <div class="qr-wrap"><img id="qrImg" alt="Mã QR chuyển khoản" width="220" height="220"><div id="qrFallback" hidden>Không tải được mã QR, hãy chuyển khoản theo thông tin bên dưới.</div></div>
-      <dl class="bank">
-        <div><dt>Ngân hàng</dt><dd id="bkName"></dd></div>
-        <div><dt>Chủ tài khoản</dt><dd id="bkHolder"></dd></div>
-        <div><dt>Số tài khoản</dt><dd><span id="bkAcc"></span><button type="button" class="copy" data-copy="bkAcc" aria-label="Chép số tài khoản"><svg class="ic" viewBox="0 0 24 24"><use href="#i-copy"/></svg></button></dd></div>
-        <div><dt>Số tiền</dt><dd><span id="bkAmt"></span><button type="button" class="copy" data-copy="bkAmtRaw" aria-label="Chép số tiền"><svg class="ic" viewBox="0 0 24 24"><use href="#i-copy"/></svg></button><span id="bkAmtRaw" hidden></span></dd></div>
-        <div class="hl"><dt>Nội dung CK</dt><dd><b id="bkCode"></b><button type="button" class="copy" data-copy="bkCode" aria-label="Chép nội dung"><svg class="ic" viewBox="0 0 24 24"><use href="#i-copy"/></svg></button></dd></div>
-      </dl>
-      <p class="warn">Hãy giữ <b>nguyên nội dung chuyển khoản</b> ở trên để hệ thống nhận ra bạn.</p>
-      <p id="shopState" class="state"><span class="dot"></span><span id="shopStateText">Đang chờ tiền về…</span></p>
-      <p class="tiny" id="shopManual"></p>
+    <div class="tu-right">
+      <div id="tuEmpty" class="tu-empty">
+        <ol class="tu-steps">
+          <li><b>1</b><span>Chọn gói xu bạn muốn</span></li>
+          <li><b>2</b><span>Quét mã QR bằng app ngân hàng</span></li>
+          <li><b>3</b><span>Xu vào ví ngay khi tiền về</span></li>
+        </ol>
+      </div>
+      <div id="tuPay" hidden>
+        <div class="tu-pay">
+          <div class="qr-wrap"><img id="qrImg" alt="Mã QR chuyển khoản" width="210" height="210"><div id="qrFallback" hidden>Không tải được mã QR, hãy chuyển khoản theo thông tin bên cạnh.</div></div>
+          <dl class="bank">
+            <div><dt>Ngân hàng</dt><dd id="bkName"></dd></div>
+            <div><dt>Chủ tài khoản</dt><dd id="bkHolder"></dd></div>
+            <div><dt>Số tài khoản</dt><dd><span id="bkAcc"></span><button type="button" class="copy" data-copy="bkAcc" aria-label="Chép số tài khoản"><svg class="ic" viewBox="0 0 24 24"><use href="#i-copy"/></svg></button></dd></div>
+            <div><dt>Số tiền</dt><dd><span id="bkAmt"></span><button type="button" class="copy" data-copy="bkAmtRaw" aria-label="Chép số tiền"><svg class="ic" viewBox="0 0 24 24"><use href="#i-copy"/></svg></button><span id="bkAmtRaw" hidden></span></dd></div>
+            <div class="hl"><dt>Nội dung CK</dt><dd><b id="bkCode"></b><button type="button" class="copy" data-copy="bkCode" aria-label="Chép nội dung"><svg class="ic" viewBox="0 0 24 24"><use href="#i-copy"/></svg></button></dd></div>
+          </dl>
+        </div>
+        <p class="warn">Giữ <b>nguyên nội dung chuyển khoản</b> để hệ thống cộng xu đúng tài khoản của bạn.</p>
+        <p id="tuState" class="state"><span class="dot"></span><span id="tuStateText">Đang chờ tiền về…</span></p>
+        <p class="tiny" id="tuManual"></p>
+      </div>
+      <div id="tuDone" hidden>
+        <div class="ok-ring"><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg></div>
+        <h3>Nạp thành công!</h3>
+        <p class="sub" id="tuDoneText"></p>
+        <button id="tuShop" type="button" class="primary wide"><svg class="ic" viewBox="0 0 24 24"><use href="#i-shirt"/></svg>Đi mua sắm ngay</button>
+      </div>
     </div>
-    <div id="shopDone" hidden>
-      <div class="ok-ring"><svg class="ic" viewBox="0 0 24 24"><use href="#i-check"/></svg></div>
-      <p class="sub">Đã nhận tiền! Vé của bạn đã được lưu trong trình duyệt này.</p>
-      <button id="shopGo" type="button" class="primary wide">Vào rạp ngay</button>
-      <label class="tiny">Mã vé dự phòng (dùng để vào trên máy khác):<input id="shopToken" readonly></label>
+  </div>
+</div>
+
+<!-- Cửa hàng thời trang / Tủ đồ -->
+<div id="fashion" class="overlay" hidden>
+  <div class="card fs-card">
+    <button id="fsClose" type="button" class="icon corner" aria-label="Đóng"><svg class="ic" viewBox="0 0 24 24"><use href="#i-close"/></svg></button>
+    <div class="fs-left">
+      <div class="fs-tabs"><button type="button" data-mode="shop" class="on"><svg class="ic" viewBox="0 0 24 24"><use href="#i-store"/></svg>Cửa hàng</button><button type="button" data-mode="ward"><svg class="ic" viewBox="0 0 24 24"><use href="#i-hanger"/></svg>Tủ đồ</button></div>
+      <div class="fs-stage"><canvas id="fsCanvas" width="340" height="440"></canvas><span class="fs-hint">Kéo để xoay</span></div>
+      <div class="fs-wallet"><span class="fs-coin"><svg class="ic" viewBox="0 0 24 24"><use href="#i-coin"/></svg><b id="fsCoins">0</b> xu</span><button id="fsTop" type="button" class="ghost small"><svg class="ic" viewBox="0 0 24 24"><use href="#i-plus"/></svg>Nạp xu</button></div>
     </div>
-    <p class="tiny" id="shopFoot"></p>
+    <div class="fs-right">
+      <div class="fs-title"><h2 id="fsTitle">Shop Thời Trang</h2><span id="fsOwnerTag" class="fs-owner" hidden><svg class="ic" viewBox="0 0 24 24"><use href="#i-crown"/></svg>Chủ shop · mọi món miễn phí</span></div>
+      <div id="fsSlots" class="fs-slots"></div>
+      <div id="fsGrid" class="fs-grid"></div>
+      <div class="fs-bar"><div id="fsInfo" class="fs-info">Chọn một món để mặc thử.</div><button id="fsAct" type="button" class="primary" disabled>Chọn món</button></div>
+    </div>
   </div>
 </div>
 
@@ -190,18 +283,21 @@
     <ul class="keys">
       <li><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / mũi tên</span><em>Đi bộ · <kbd>Shift</kbd> chạy</em></li>
       <li><span>Điện thoại</span><em>Cần gạt bên trái để đi, kéo màn hình để xoay</em></li>
-      <li><span>Bấm vào ghế</span><em>Viền xanh = trống · <kbd>E</kbd> ngồi ghế gần nhất</em></li>
+      <li><span>Bấm vào ghế (trong rạp)</span><em>Viền xanh = trống · <kbd>E</kbd> ngồi ghế gần nhất</em></li>
+      <li><span>Shop Thời Trang</span><em>Đứng gần quầy để mua đồ, gần gương để thử đồ</em></li>
       <li><span><kbd>E</kbd> / nút Chơi</span><em>Chơi máy game, qua cửa khi đứng gần</em></li>
       <li><span><kbd>Space</kbd></span><em>Đứng dậy</em></li>
-      <li><span><kbd>1</kbd>–<kbd>7</kbd></span><em>Thả biểu cảm</em></li>
+      <li><span><kbd>1</kbd>–<kbd>9</kbd></span><em>Biểu cảm & cử chỉ</em></li>
+      <li><span><kbd>M</kbd></span><em>Bật / tắt micro (nói chuyện với người đứng gần)</em></li>
       <li><span><kbd>Enter</kbd></span><em>Mở chat · <kbd>Esc</kbd> thoát</em></li>
     </ul>
-    <p class="tip">Ai trong phòng cũng điều khiển được màn hình: dán link YouTube rồi bấm “Chiếu ngay”.</p>
+    <p class="tip">Trong Rạp Chiếu Phim ai cũng điều khiển được màn hình: dán link YouTube rồi bấm “Chiếu ngay”. Mua đồ cần đăng nhập tài khoản.</p>
     <button id="helpClose" type="button" class="primary">Đã hiểu</button>
   </div>
 </div>
 
 <script src="layout.js"></script>
+<script src="catalog.js"></script>
 <script type="module" src="main.js"></script>
 <noscript>Bạn cần bật JavaScript để chơi.</noscript>
 </body>

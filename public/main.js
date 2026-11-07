@@ -2,7 +2,12 @@ import * as THREE from 'three';
 import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import { buildWorld } from './world.js';
 import { buildArcade } from './arcade.js';
-import { createShop } from './shop.js';
+import { loadCharacter, characterReady, createCharacter, EMOTE_MS, sitY } from './character.js';
+import { initAuth } from './auth.js';
+import { createVoice } from './voice.js';
+import { buildPlaza, buildShop } from './town.js';
+import { createWalletUI } from './wallet-ui.js';
+import { loadOutfitMask } from './outfit.js';
 import { createGames } from './games.js';
 import { createTouch, isTouchDevice } from './touch.js';
 import { EMOTE_META, ICONS, icon, injectSprite } from './icons.js';
@@ -16,11 +21,13 @@ const store = {
 };
 
 const EMOTE_LIST = EMOTE_META;
+const mkAvatar = (lk) => (characterReady() ? createCharacter() : createAvatar(lk));
+let charState = 'loading';
+const charLoad = Promise.all([loadCharacter(), loadOutfitMask()]).then((r) => r[0]).then((ok) => { charState = ok ? 'ok' : 'fail'; if (ok && pv.r) rebuildPreview(); return ok; });
 const TOUCH = isTouchDevice();
-let RL = L.layoutOf('theater'); // bố cục của phòng hiện tại
-let curRoom = L.ROOM_BY_ID.std;
+let RL = L.layoutOf('plaza'); // bố cục của phòng hiện tại
+let curRoom = L.ROOM_BY_ID.plaza;
 let roomCounts = {};
-let passes = new Map(); // roomId -> exp (ms, 0 = vĩnh viễn)
 injectSprite();
 
 // ====================== Three.js ======================
@@ -33,8 +40,8 @@ renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 80);
-let world = buildWorld(scene, 'std');
-let worldKey = 'std';
+let world = buildPlaza(scene);
+let worldKey = 'plaza';
 
 // Lớp CSS3D chứa video YouTube, nằm phía sau canvas WebGL (nhìn xuyên qua "lỗ" trên màn hình)
 const css = new CSS3DRenderer({ element: $('css3d') });
@@ -58,15 +65,18 @@ css3dObj.scale.setScalar(L.SCREEN.w / SCR_PX.w);
 cssScene.add(css3dObj);
 
 function buildRoomWorld(def) {
-  const key = def.kind === 'arcade' ? 'arcade' : def.id;
+  const key = def.id;
   RL = L.layoutOf(def.kind);
   curRoom = def;
   if (key !== worldKey) {
     world.dispose();
-    world = def.kind === 'arcade' ? buildArcade(scene) : buildWorld(scene, def.id);
+    world = def.kind === 'arcade' ? buildArcade(scene)
+      : def.kind === 'plaza' ? buildPlaza(scene)
+      : def.kind === 'shop' ? buildShop(scene, () => (characterReady() ? createCharacter() : null))
+      : buildWorld(scene, 'vip');
     worldKey = key;
   }
-  css.domElement.style.display = def.kind === 'arcade' ? 'none' : '';
+  css.domElement.style.display = def.kind === 'theater' ? '' : 'none';
   $('roomName').textContent = def.name;
 }
 
@@ -91,49 +101,22 @@ function initPreview() {
   const cv = $('preview');
   pv.r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
   pv.r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  pv.r.setSize(240, 300, false);
+  pv.r.setSize(cv.clientWidth || 240, cv.clientHeight || 300, false);
   pv.scene = new THREE.Scene();
   pv.scene.add(new THREE.HemisphereLight(0xffffff, 0x553355, 1.6));
   const dl = new THREE.DirectionalLight(0xffffff, 1.6);
   dl.position.set(2, 3, 4);
   pv.scene.add(dl);
-  pv.cam = new THREE.PerspectiveCamera(32, 240 / 300, 0.1, 20);
+  pv.cam = new THREE.PerspectiveCamera(32, (cv.clientWidth || 240) / (cv.clientHeight || 300), 0.1, 20);
   pv.cam.position.set(0, 1.15, 4.1);
   pv.cam.lookAt(0, 0.98, 0);
   rebuildPreview();
 }
 function rebuildPreview() {
   if (pv.av) pv.scene.remove(pv.av.group);
-  pv.av = createAvatar(look);
+  pv.av = mkAvatar(look);
   pv.scene.add(pv.av.group);
 }
-function buildPickers() {
-  document.querySelectorAll('.pick').forEach((el) => {
-    const key = el.dataset.key;
-    const box = el.querySelector('.sw');
-    box.innerHTML = '';
-    const n = C[key];
-    for (let i = 0; i < n; i++) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      if (key === 'hat') b.textContent = LOOK_DEFS.hatNames[i];
-      else b.style.background = hex(LOOK_DEFS[key][i]);
-      b.className = look[key] === i ? 'on' : '';
-      b.addEventListener('click', () => {
-        look[key] = i;
-        box.querySelectorAll('button').forEach((x, j) => x.classList.toggle('on', j === i));
-        rebuildPreview();
-      });
-      box.appendChild(b);
-    }
-  });
-}
-$('randomBtn').addEventListener('click', () => {
-  for (const k of Object.keys(C)) look[k] = Math.floor(Math.random() * C[k]);
-  buildPickers();
-  rebuildPreview();
-});
-buildPickers();
 
 // ====================== Trạng thái game ======================
 const me = { id: null, x: L.SPAWN.x, z: L.SPAWN.z, ry: Math.PI, seat: null, speed: 0, name: '' };
@@ -150,16 +133,24 @@ let autoWalk = null;
 
 const cam = { yaw: 0, pitch: 0.42, dist: 5.2, targetDist: 5.2, lookYaw: 0, lookPitch: 0.06, lx: 0, ly: 0, lz: 0 };
 
+const ringGeo = new THREE.RingGeometry(0.5, 0.62, 40);
 function makePeer(p, isMe = false) {
-  const av = createAvatar(p.look || look);
-  const label = makeLabel(p.name, { self: isMe });
+  const av = mkAvatar(p.look || look);
+  const label = makeLabel((p.own ? '★ ' : '') + p.name, { self: isMe || !!p.own });
   label.position.set(0, 2.0, 0);
   av.group.add(label);
   scene.add(av.group);
+  if (av.setOutfit && p.o) av.setOutfit(p.o);
   const peer = {
     id: p.id, name: p.name, look: p.look, av, label, bubble: null, bubbleUntil: 0, emote: null, floats: [],
     x: p.x, z: p.z, ry: p.ry, tx: p.x, tz: p.z, try_: p.ry, seat: p.seat ?? null, speed: 0, isMe,
   };
+  const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0x4cff8a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.visible = false;
+  av.group.add(ring);
+  peer.ring = ring;
+  peer.speaking = false;
   av.group.position.set(p.x, RL.heightAt(p.z), p.z);
   av.group.rotation.y = p.ry;
   return peer;
@@ -184,21 +175,32 @@ function connect() {
   ws = new WebSocket(`${proto}://${location.host}`);
   const mine = ws;
   mine.onopen = () => {
-    send({ t: 'join', name: me.name, look, room: curRoom.id, tokens: shop.tokens() });
-    send({ t: 'ping', t0: Date.now() });
+    (async () => {
+      let idToken = null;
+      try { idToken = auth.enabled && acct ? await auth.idToken() : null; } catch {}
+      if (mine !== ws) return;
+      send({ t: 'join', name: me.name, look, room: curRoom.id, idToken });
+      send({ t: 'ping', t0: Date.now() });
+    })();
   };
   mine.onmessage = (e) => {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
     onMessage(m);
   };
-  mine.onclose = () => {
+  mine.onclose = (ev) => {
     if (mine !== ws) return;
+    if (ev && ev.code === 4001) {
+      setNet('bad', 'đã đăng nhập nơi khác');
+      toast('Tài khoản này đang chơi ở nơi khác nên phiên này bị ngắt. Tải lại trang để vào lại.');
+      voice && voice.stop && voice.stop();
+      return;
+    }
     setNet('bad', 'mất kết nối - đang thử lại…');
     if (joined) toast('Mất kết nối, đang thử vào lại…');
     clearPeers();
-    $('joinStatus').textContent = joined ? '' : 'Không kết nối được máy chủ, đang thử lại…';
-    $('enterBtn').disabled = false;
+    if (!joined) setStatus('Không kết nối được máy chủ, đang thử lại…');
+    $('enterBtn').disabled = false; $('enterAcct').disabled = false;
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(connect, 2000);
   };
@@ -213,6 +215,7 @@ function clearPeers() {
   updateOnline();
 }
 function removePeerVisual(p) {
+  if (p.ring) p.ring.material.dispose();
   disposeSprite(p.label);
   disposeSprite(p.bubble);
   p.floats.forEach((f) => disposeSprite(f.sp));
@@ -232,12 +235,14 @@ function onMessage(m) {
     case 'welcome': {
       clockOffset = m.serverTime - Date.now();
       clearPeers();
-      const def = L.ROOM_BY_ID[m.room] || L.ROOM_BY_ID.std;
+      const def = L.ROOM_BY_ID[m.room] || L.ROOM_BY_ID.plaza;
       const changed = joined && def.id !== curRoom.id;
       buildRoomWorld(def);
-      if (m.passes) setPasses(m.passes);
+      if (m.w) wal.setWallet(m.w);
       if (m.counts) { roomCounts = m.counts; }
       games.close(true);
+      voice.reset();
+      voice.start();
       interactId = null;
       me.id = m.id;
       for (const p of m.players) {
@@ -250,9 +255,7 @@ function onMessage(m) {
       camSnap();
       $('chatLog').innerHTML = '';
       m.chat.forEach((c) => addChat(c.name, c.text, c.id === me.id, true));
-      addSys(def.kind === 'arcade'
-        ? 'Chào mừng đến Khu Giải Trí! Chạy vào quả bóng để sút, lại gần máy game và bấm E / nút Chơi.'
-        : changed ? `Bạn vừa vào ${def.name}. Bấm vào ghế trống để ngồi xem.` : 'Chào mừng bạn đến rạp chiếu phim! Bấm vào một ghế trống để ngồi xem.');
+      addSys(WELCOME[def.kind] || `Bạn vừa vào ${def.name}.`);
       if (m.ball && world.setBall) { world.setBall(m.ball.b, false); world.setScores(m.ball.top); }
       if (TOUCH) touch.show(true);
       renderRooms();
@@ -279,6 +282,7 @@ function onMessage(m) {
       const p = peers.get(m.id);
       if (!p) return;
       removePeerVisual(p);
+      voice.peerLeft(m.id);
       peers.delete(m.id);
       for (const [s, id] of seatOwner) if (id === m.id) seatOwner.delete(s);
       updateOnline();
@@ -332,12 +336,16 @@ function onMessage(m) {
       return;
     }
     case 'sys': addSys(m.text); return;
-    case 'err':
-      toast(m.text);
-      if (m.need && L.ROOM_BY_ID[m.need] && L.ROOM_BY_ID[m.need].price > 0) shop.open(L.ROOM_BY_ID[m.need]);
+    case 'err': toast(m.text); return;
+    case 'wallet': wal.setWallet(m.w); if (m.toast) toast(m.toast); return;
+    case 'buyres': wal.onBuyRes(m); return;
+    case 'outfit': {
+      const p = peers.get(m.id);
+      if (p && p.av.setOutfit) p.av.setOutfit(m.o || {});
       return;
+    }
+    case 'rtc': voice.onSignal(m.from, m.d); return;
     case 'rooms': roomCounts = m.counts || {}; if (curPanel === 'rooms') renderRooms(); return;
-    case 'passes': setPasses(m.passes); return;
     case 'ball': if (world.setBall) world.setBall(m.b, m.frozen); return;
     case 'goal':
       if (world.celebrate) { world.celebrate(m.by); world.setScores(m.top); }
@@ -385,7 +393,7 @@ function showBubble(p, text) {
   p.bubbleUntil = performance.now() + Math.min(9000, 3500 + text.length * 60);
 }
 function playEmote(p, e) {
-  p.emote = { type: e, until: performance.now() + 2200 };
+  p.emote = { type: e, until: performance.now() + (EMOTE_MS[e] || 2200) };
   const sp = makeEmote(e);
   sp.scale.setScalar(0.62);
   sp.position.set((Math.random() - 0.5) * 0.4, 2.2, 0);
@@ -443,6 +451,7 @@ function updatePeopleList() {
     if (p.isMe) d.className = 'me';
     const n = document.createElement('span');
     n.textContent = p.name + (p.isMe ? ' (bạn)' : '');
+    if (p.speaking) { const dot = document.createElement('i'); dot.className = 'speakdot'; n.prepend(dot); }
     const s = document.createElement('small');
     s.textContent = p.seat !== null && RL.SEATS[p.seat] ? RL.SEATS[p.seat].label : 'đang đứng';
     d.append(n, s);
@@ -741,7 +750,7 @@ function openPanel(name) {
     if (!TOUCH) setTimeout(() => $('chatInput').focus(), 30);
   }
   if (name === 'screen') {
-    const arc = curRoom.kind === 'arcade';
+    const arc = curRoom.kind !== 'theater';
     $('noScreen').hidden = !arc;
     $('screenBody').hidden = arc;
   }
@@ -772,45 +781,59 @@ function noteChat(name, text) {
   setTimeout(() => p.remove(), 6000);
 }
 
-// ====================== Phòng, vé, thanh toán ======================
-const shop = createShop({
-  store, toast,
-  onToken: (token) => { send({ t: 'pass', token }); toast('Đã nhận vé! Bạn có thể vào phòng mới rồi.'); },
+// ====================== Voice chat ======================
+const voice = createVoice({
+  send,
+  getPeers: () => peers,
+  getMe: () => me,
+  getMyId: () => me.id,
+  toast,
+  onSpeaking: (id, on) => {
+    const p = id === 'me' ? selfPeer() : peers.get(id);
+    if (p) p.speaking = on;
+    if (id === 'me') $('micBtn').classList.toggle('talk', on);
+    if (curPanel === 'people') updatePeopleList();
+  },
+  onState: ({ mic, spk }) => {
+    $('micBtn').classList.toggle('live', mic);
+    $('micIcon').setAttribute('href', mic ? '#i-mic' : '#i-micoff');
+    $('micBtn').setAttribute('aria-pressed', String(mic));
+    $('spkBtn').classList.toggle('off', !spk);
+    $('spkIcon').setAttribute('href', spk ? '#i-volume' : '#i-mute');
+    $('micLabel').textContent = mic ? 'Mic bật' : 'Mic';
+  },
 });
-shop.onGo((id) => { if (id) goRoom(id); });
+window.__voice = voice; // chỉ để kiểm thử
+$('micBtn').addEventListener('click', () => voice.setMic(!voice.mic));
+$('spkBtn').addEventListener('click', () => voice.setSpeaker(!voice.spk));
 
-function setPasses(list) {
-  passes = new Map((list || []).map((p) => [p.room, p.exp]));
-  if (curPanel === 'rooms') renderRooms();
-}
-const hasPass = (id) => {
-  const r = L.ROOM_BY_ID[id];
-  if (!r || !(r.price > 0)) return true;
-  if (!passes.has(id)) return false;
-  const exp = passes.get(id);
-  return exp === 0 || exp > serverNow();
+// ====================== Phòng, ví xu, thời trang ======================
+const WELCOME = {
+  plaza: 'Chào mừng đến Phố Vui! Đi qua cổng để vào Rạp Chiếu Phim, Khu Giải Trí hoặc Shop Thời Trang.',
+  theater: 'Chào mừng đến Rạp Chiếu Phim! Bấm vào một ghế trống để ngồi xem, dán link YouTube ở mục Màn hình.',
+  arcade: 'Chào mừng đến Khu Giải Trí! Chạy vào quả bóng để sút, lại gần máy game và bấm E / nút Chơi.',
+  shop: 'Chào mừng đến Shop Thời Trang! Lại gần quầy để mua đồ, lại gần gương để thử đồ.',
 };
-function daysLeft(id) {
-  const exp = passes.get(id);
-  if (!exp) return 'vĩnh viễn';
-  return 'còn ' + Math.max(1, Math.ceil((exp - serverNow()) / 86400000)) + ' ngày';
-}
+const wal = createWalletUI({
+  send, toast,
+  getIdToken: () => auth.idToken(),
+  isAccount: () => !!acct,
+  onNeedLogin: () => { toast('Đang đưa bạn về màn hình đăng nhập…'); setTimeout(() => location.reload(), 700); },
+});
+$('wardBtn').addEventListener('click', () => { closePanel(); wal.open('ward'); });
+$('topBtn').addEventListener('click', () => { closePanel(); wal.openTopup(); });
 function renderRooms() {
   const box = $('roomList');
   if (!box) return;
   box.innerHTML = '';
   for (const r of L.ROOMS) {
     const here = r.id === curRoom.id;
-    const locked = !hasPass(r.id);
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = `room-card t-${r.id}${here ? ' here' : ''}${locked ? ' locked' : ''}`;
-    const price = r.price > 0 ? new Intl.NumberFormat('vi-VN').format(r.price) + 'đ' : 'Miễn phí';
+    b.className = `room-card t-${r.id}${here ? ' here' : ''}`;
     const n = roomCounts[r.id] || 0;
-    const cta = here ? 'Đang ở đây' : locked ? 'Mua vé ' + price : 'Vào';
-    const state = here ? '' : (r.price > 0 && !locked ? `<span class="state">Đã có vé · ${daysLeft(r.id)}</span>` : (r.price > 0 ? `<span>${icon('lock')} ${price}</span>` : ''));
     b.innerHTML = `<div class="rc-top"><b>${r.name}</b><span class="tag">${r.tag}</span></div><p>${r.desc}</p>
-      <div class="rc-bot"><span>${icon('users')} ${n} người ${state ? '· ' : ''}${state}</span><span class="cta">${cta}</span></div>`;
+      <div class="rc-bot"><span>${icon('users')} ${n} người</span><span class="cta">${here ? 'Đang ở đây' : 'Đi tới'}</span></div>`;
     b.addEventListener('click', () => { if (!here) goRoom(r.id); });
     box.appendChild(b);
   }
@@ -819,16 +842,10 @@ let lastRoomSwitch = -9999;
 function goRoom(id) {
   const r = L.ROOM_BY_ID[id];
   if (!r || r.id === curRoom.id) return;
-  if (!hasPass(id)) { shop.open(r); return; }
   if (performance.now() - lastRoomSwitch < 1100) { toast('Chờ một giây rồi đổi phòng nhé.'); return; }
   lastRoomSwitch = performance.now();
   send({ t: 'room', room: id });
 }
-$('ticketBtn').addEventListener('click', async () => {
-  const ok = await shop.redeem($('ticketInput').value);
-  if (ok) { $('ticketInput').value = ''; toast('Đã thêm vé.'); }
-});
-$('ticketInput').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') $('ticketBtn').click(); });
 
 // ====================== Trò chơi nhỏ + điểm tương tác ======================
 let gameOpen = false;
@@ -857,12 +874,12 @@ function updateInteract(force) {
   const id = nearest ? nearest.id : null;
   if (id !== interactId || force) {
     interactId = id;
-    if (nearest) $('actText').textContent = nearest.type === 'door' ? nearest.label : 'Chơi: ' + nearest.label;
+    if (nearest) $('actText').textContent = nearest.type === 'game' ? 'Chơi: ' + nearest.label : nearest.label;
     $('prompt').hidden = !nearest;
   }
   // nhãn nút cảm ứng
   if (TOUCH) {
-    if (nearest) touch.setAction(nearest.type === 'door' ? 'Vào' : 'Chơi', nearest.type === 'door' ? 'enter' : 'gamepad', false);
+    if (nearest) touch.setAction(nearest.type === 'door' ? 'Vào' : nearest.type === 'game' ? 'Chơi' : nearest.type === 'shop' ? 'Mua sắm' : 'Thử đồ', nearest.type === 'door' ? 'enter' : nearest.type === 'game' ? 'gamepad' : 'hanger', false);
     else if (me.seat !== null) touch.setAction('Đứng dậy', 'seat', false);
     else if (RL.SEATS.length) touch.setAction('Ngồi', 'seat', !nearSeat());
     else touch.setAction('—', 'hand', true);
@@ -878,6 +895,8 @@ function act() {
   if (nearest) {
     if (nearest.type === 'game') { games.open(nearest.game); closePanel(); }
     else if (nearest.type === 'door') goRoom(nearest.go);
+    else if (nearest.type === 'shop') { closePanel(); wal.open('shop'); }
+    else if (nearest.type === 'wardrobe') { closePanel(); wal.open('ward'); }
     return;
   }
   sitNearest();
@@ -892,16 +911,17 @@ window.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
   if (k === 'escape') {
-    if (!$('shop').hidden) shop.close();
+    if (wal.isOpen()) wal.close();
     else if (gameOpen) games.close();
     else if (!$('help').hidden) $('help').hidden = true;
     else closePanel();
     return;
   }
-  if (gameOpen || !$('shop').hidden) return;
+  if (gameOpen || wal.isOpen()) return;
   if (k === 'enter') { e.preventDefault(); if (curPanel !== 'chat') openPanel('chat'); else $('chatInput').focus(); return; }
-  if (/^[1-7]$/.test(k)) { doEmote(EMOTE_LIST[+k - 1].key); return; }
+  if (/^[1-9]$/.test(k)) { doEmote(EMOTE_LIST[+k - 1].key); return; }
   if (k === 'e') { act(); return; }
+  if (k === 'm') { voice.setMic(!voice.mic); return; }
   if (k === ' ') { e.preventDefault(); if (me.seat !== null) send({ t: 'stand' }); return; }
   keys.add(k);
   if (k.startsWith('arrow')) e.preventDefault();
@@ -1091,7 +1111,7 @@ function updateSelf(dt) {
   }
 
   const sprint = keys.has('shift') || touch.state.run;
-  const speed = (sprint ? 5.2 : 3.2) * (dx || dz ? analog : 0);
+  const speed = (sprint ? 4.4 : 2.2) * (dx || dz ? analog : 0);
   if (speed) {
     const nx = me.x + dx * speed * dt, nz = me.z + dz * speed * dt;
     const r = RL.resolve(nx, nz);
@@ -1154,16 +1174,25 @@ function updatePeers(dt, nowMs) {
     let y;
     if (seated) {
       const s = RL.SEATS[p.seat];
-      y = s.floorY + (s.kind === 'bean' ? 0.25 : 0.52) - HIP_Y + 0.07;
+      const top = s.floorY + (s.kind === 'bean' ? 0.25 : 0.52);
+      y = p.av.isChar ? sitY(top, s.floorY) : top - HIP_Y + 0.07;
     } else y = RL.heightAt(p.z);
     g.position.set(p.x, y, p.z);
     if (seated) {
       const s = RL.SEATS[p.seat];
-      // lùi vào lưng ghế một chút
-      g.position.z += s.kind === 'bean' ? 0.08 : 0.1;
+      g.position.z += s.kind === 'bean' ? 0.08 : (p.av.isChar ? 0.02 : 0.1);
     }
     g.rotation.y = p.ry;
+    if (p.ring) {
+      p.ring.visible = p.speaking;
+      if (p.speaking) {
+        const k = 1 + 0.18 * Math.sin(nowMs / 130);
+        p.ring.scale.set(k, k, k);
+        p.ring.position.y = seated ? RL.SEATS[p.seat].floorY - y + 0.04 : 0.04;
+      }
+    }
 
+    if (!seated && (p.isMe ? p.speed : moved) > 0.6) p.emote = null;
     p.av.update(dt, {
       speed: seated ? 0 : p.isMe ? p.speed : Math.min(moved, 6),
       sitting: seated,
@@ -1257,24 +1286,130 @@ function frame() {
   }
 }
 
-// ====================== Khởi động ======================
-function enter() {
-  const name = $('nameInput').value.replace(/[<>]/g, '').trim().slice(0, 16);
-  if (!name) {
-    $('joinStatus').textContent = 'Hãy nhập tên của bạn trước nhé.';
-    $('nameInput').focus();
-    return;
+// ====================== Tài khoản & khởi động ======================
+let auth = { enabled: false };
+let acct = null;
+let tab = 'guest';
+const setStatus = (t, cls = '') => { const el = $('joinStatus'); el.textContent = t; el.className = 'status ' + cls; };
+function showTab(t) {
+  tab = t;
+  document.querySelectorAll('#authTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+  document.querySelectorAll('.tabpane').forEach((p) => (p.hidden = p.dataset.pane !== t));
+  setStatus('');
+}
+function renderAuth() {
+  const tabs = $('authTabs');
+  $('nameInput').hidden = !!acct;
+  wal.showGuestCoin(!acct);
+  if (!auth.enabled) { tabs.hidden = true; showTab('guest'); $('guestNote').hidden = true; return; }
+  $('guestNote').hidden = false;
+  if (acct) {
+    tabs.hidden = true;
+    const nm = acct.displayName || (acct.email || '').split('@')[0] || 'Người chơi';
+    $('acctName').textContent = nm;
+    $('acctMail').textContent = acct.email || '';
+    $('acctInit').textContent = nm.trim().charAt(0).toUpperCase() || '?';
+    showTab('account');
+  } else {
+    tabs.hidden = false;
+    showTab(tab === 'account' ? 'login' : tab === 'guest' && !$('authTabs').dataset.init ? 'login' : tab);
+    $('authTabs').dataset.init = '1';
+  }
+}
+async function onAuth(u) {
+  acct = u || null;
+  renderAuth();
+}
+document.querySelectorAll('#authTabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+const busy = (btn, on) => { btn.disabled = on; };
+$('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = $('liEmail').value.trim(), pw = $('liPass').value;
+  if (!email || !pw) return setStatus('Hãy nhập email và mật khẩu.', 'err');
+  busy($('liBtn'), true); setStatus('Đang đăng nhập…');
+  const r = await auth.login(email, pw);
+  busy($('liBtn'), false);
+  setStatus(r.ok ? '' : r.error, r.ok ? '' : 'err');
+});
+$('regForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('rgName').value.replace(/[<>]/g, '').trim().slice(0, 16);
+  const email = $('rgEmail').value.trim(), pw = $('rgPass').value;
+  if (!name) return setStatus('Hãy nhập tên hiển thị.', 'err');
+  if (!email) return setStatus('Hãy nhập email.', 'err');
+  if (pw.length < 6) return setStatus('Mật khẩu cần ít nhất 6 ký tự.', 'err');
+  if (pw !== $('rgPass2').value) return setStatus('Hai mật khẩu chưa giống nhau.', 'err');
+  busy($('rgBtn'), true); setStatus('Đang tạo tài khoản…');
+  const r = await auth.register(email, pw, name);
+  busy($('rgBtn'), false);
+  if (r.ok) { acct = auth.user; renderAuth(); setStatus('Tạo tài khoản thành công!', 'ok'); } else setStatus(r.error, 'err');
+});
+$('forgotBtn').addEventListener('click', async () => {
+  const email = $('liEmail').value.trim();
+  if (!email) return setStatus('Nhập email vào ô trên rồi bấm lại “Quên mật khẩu”.', 'err');
+  const r = await auth.reset(email);
+  setStatus(r.ok ? 'Đã gửi email đặt lại mật khẩu (xem cả hộp thư rác).' : r.error, r.ok ? 'ok' : 'err');
+});
+$('logoutBtn').addEventListener('click', async () => { await auth.logout(); });
+
+function enter(asAccount) {
+  let name;
+  if (asAccount && acct) name = (acct.displayName || (acct.email || '').split('@')[0] || 'Người chơi').slice(0, 16);
+  else {
+    name = $('nameInput').value.replace(/[<>]/g, '').trim().slice(0, 16);
+    if (!name) { setStatus('Hãy nhập tên của bạn trước nhé.', 'err'); $('nameInput').focus(); return; }
+    store.set('name', name);
   }
   me.name = name;
-  store.set('name', name);
   store.set('look', look);
-  $('enterBtn').disabled = true;
-  $('joinStatus').textContent = 'Đang vào rạp…';
-  connect();
+  $('enterBtn').disabled = true; $('enterAcct').disabled = true;
+  setStatus(charState === 'loading' ? 'Đang tải nhân vật…' : 'Đang vào thế giới…');
+  charLoad.then(() => { setStatus('Đang vào thế giới…'); connect(); });
 }
-$('enterBtn').addEventListener('click', enter);
-$('nameInput').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') enter(); });
+$('enterBtn').addEventListener('click', () => enter(!!acct));
+$('enterAcct').addEventListener('click', () => enter(true));
+$('nameInput').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') enter(false); });
+for (const id of ['liEmail', 'liPass', 'rgName', 'rgEmail', 'rgPass', 'rgPass2']) $(id).addEventListener('keydown', (e) => e.stopPropagation());
 
+showTab('guest');
+initAuth(onAuth).then((a) => {
+  auth = a;
+  if (a.error) setStatus(a.error, 'err');
+  renderAuth();
+});
 initPreview();
 frame();
-(document.fonts?.ready || Promise.resolve()).then(() => {});
+
+// ====================== Màn hình chờ: phong cảnh, menu, số người online ======================
+(function landing() {
+  const svg = $('ldCity');
+  if (svg) {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
+    let out = '';
+    for (const [layer, fill, wmin, hmax] of [[0, '#8fb4e6', 50, 230], [1, '#6a8fd0', 60, 300], [2, '#4a6fb8', 70, 360]]) {
+      let x = -20 + layer * 15;
+      while (x < 1620) {
+        const w = wmin + rnd() * 70, h = 90 + rnd() * (hmax - 90);
+        out += `<rect x="${x.toFixed(0)}" y="${(400 - h).toFixed(0)}" width="${w.toFixed(0)}" height="${h.toFixed(0)}" fill="${fill}" opacity="${0.55 + layer * 0.2}"/>`;
+        if (layer > 0) for (let wy = 400 - h + 14; wy < 392; wy += 22) for (let wx = x + 8; wx < x + w - 10; wx += 16) if (rnd() > 0.62) out += `<rect x="${wx.toFixed(0)}" y="${wy.toFixed(0)}" width="7" height="10" fill="#ffeeb0" opacity=".85"/>`;
+        x += w + 4 + rnd() * 14;
+      }
+    }
+    svg.innerHTML = out;
+  }
+  const scroll = (id) => { const el = $(id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
+  document.querySelectorAll('.ld-nav [data-go], .ld-tile[data-go]').forEach((a) => a.addEventListener('click', (e) => {
+    e.preventDefault();
+    const g = a.dataset.go;
+    if (g === 'help') $('help').hidden = false;
+    else if (g === 'top') $('join').scrollTo({ top: 0, behavior: 'smooth' });
+    else scroll('ldTiles');
+    document.querySelectorAll('.ld-nav nav a').forEach((x) => x.classList.toggle('on', x === a));
+  }));
+  async function online() {
+    try { const j = await (await fetch('/healthz', { cache: 'no-store' })).json(); $('ldOnline').textContent = j.online ?? j.players ?? 0; } catch {}
+  }
+  online();
+  setInterval(() => { if (!$('join').hidden) online(); }, 10000);
+})();

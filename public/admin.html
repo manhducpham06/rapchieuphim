@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Quản trị · Rạp Chiếu Phim</title>
+<title>Quản trị · Phố Vui</title>
 <style>
   :root { color-scheme: dark; --bg:#0d0710; --panel:#1b1226; --line:rgba(255,255,255,.14); --gold:#f5c451; --muted:#b7a9bd; --good:#4cff8a; }
   * { box-sizing: border-box; }
@@ -31,8 +31,8 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Quản trị rạp chiếu phim</h1>
-  <p class="sub">Đối chiếu app ngân hàng, thấy tiền về đúng <b>số tiền</b> và <b>nội dung</b> thì bấm “Xác nhận”. Người chơi sẽ nhận vé trong vài giây.</p>
+  <h1>Quản trị Phố Vui</h1>
+  <p class="sub">Đối chiếu app ngân hàng, thấy tiền về đúng <b>số tiền</b> và <b>nội dung</b> thì bấm “Xác nhận”. Xu sẽ tự vào ví của người chơi trong vài giây.</p>
 
   <div class="card" id="login">
     <div class="row">
@@ -48,16 +48,16 @@
       <button class="ghost" id="logout" type="button">Đăng xuất</button>
     </div>
     <h2>Đơn đang chờ tiền</h2>
-    <div class="card tablewrap"><table><thead><tr><th>Nội dung CK</th><th>Phòng</th><th>Số tiền</th><th>Tạo lúc</th><th></th></tr></thead><tbody id="pending"></tbody></table></div>
+    <div class="card tablewrap"><table><thead><tr><th>Nội dung CK</th><th>Gói</th><th>Số tiền</th><th>Tạo lúc</th><th></th></tr></thead><tbody id="pending"></tbody></table></div>
     <h2>Xác nhận theo mã</h2>
     <div class="card"><div class="row"><input id="manual" placeholder="Ví dụ: RAPG7K2QM" maxlength="40" autocomplete="off"><button id="manualBtn" type="button">Xác nhận</button></div><div class="err" id="manualErr"></div></div>
     <h2>Đã thanh toán</h2>
-    <div class="card tablewrap"><table><thead><tr><th>Nội dung CK</th><th>Phòng</th><th>Số tiền</th><th>Lúc</th><th>Nguồn</th></tr></thead><tbody id="paid"></tbody></table></div>
+    <div class="card tablewrap"><table><thead><tr><th>Nội dung CK</th><th>Gói</th><th>Số tiền</th><th>Lúc</th><th>Nguồn</th></tr></thead><tbody id="paid"></tbody></table></div>
   </div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
-const NAMES = { S: 'Rạp Bạc', G: 'Rạp Vàng', V: 'Rạp Kim Cương' };
+const NAMES = { p2: 'Gói 2.000 xu', p5: 'Gói 5.000 xu', p10: 'Gói 10.000 xu' };
 const SOURCE = { webhook: 'Tự động', admin: 'Thủ công' };
 const money = (n) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
 const when = (t) => new Date(t).toLocaleString('vi-VN');
@@ -88,7 +88,7 @@ async function load() {
   if (!r.json.pending.length) p.innerHTML = '<tr><td colspan="5" class="empty">Chưa có đơn nào đang chờ</td></tr>';
   for (const o of r.json.pending) {
     const tr = document.createElement('tr');
-    cell(tr, o.code, true); cell(tr, NAMES[o.code[3]] || o.room); cell(tr, money(o.amount)); cell(tr, when(o.createdAt));
+    cell(tr, o.code, true); cell(tr, NAMES[o.pack] || o.pack); cell(tr, money(o.amount)); cell(tr, when(o.createdAt));
     const td = document.createElement('td'); const b = document.createElement('button'); b.textContent = 'Xác nhận';
     b.onclick = () => confirmCode(o.code); td.appendChild(b); tr.appendChild(td); p.appendChild(tr);
   }
@@ -96,7 +96,7 @@ async function load() {
   if (!r.json.paid.length) d.innerHTML = '<tr><td colspan="5" class="empty">Chưa có giao dịch</td></tr>';
   for (const o of r.json.paid) {
     const tr = document.createElement('tr');
-    cell(tr, o.code, true); cell(tr, NAMES[o.code[3]] || o.room); cell(tr, money(o.amount)); cell(tr, when(o.paidAt));
+    cell(tr, o.code, true); cell(tr, NAMES[o.pack] || o.pack); cell(tr, money(o.amount)); cell(tr, when(o.paidAt));
     const td = cell(tr, ''); const s = document.createElement('span'); s.className = 'tag'; s.textContent = SOURCE[o.source] || o.source; td.appendChild(s);
     d.appendChild(tr);
   }

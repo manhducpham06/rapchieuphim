@@ -435,7 +435,7 @@ export function buildArcade(scene) {
   root.add(bulbs);
 
   // cổng về sảnh + điểm tương tác
-  const door = makeDoor(root, A.DOOR.x, 0, R.maxZ - 0.1, PI, 'VỀ SẢNH RẠP', '#2ee6ff', '#7a3cff', 0xcfd8e3);
+  const door = makeDoor(root, A.DOOR.x, 0, R.maxZ - 0.1, PI, 'RA QUẢNG TRƯỜNG', '#2ee6ff', '#7a3cff', 0xcfd8e3);
   const markers = addInteractMarkers(root, A.INTERACT, () => 0);
 
   // ===== API =====

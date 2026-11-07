@@ -586,8 +586,8 @@ export function buildWorld(scene, themeId = 'std') {
     root.add(g);
   });
 
-  // ===== Cổng sang Khu Giải Trí + điểm tương tác =====
-  const door = makeDoor(root, L.DOOR_ARCADE.x + 1.8, L.TOP_Y, L.DOOR_ARCADE.z, -Math.PI / 2, 'KHU GIẢI TRÍ', '#ff9a3c', '#ff2d95', 0xd9ad4b);
+  // ===== Cổng ra Quảng Trường + điểm tương tác =====
+  const door = makeDoor(root, L.DOOR_ARCADE.x + 1.8, L.TOP_Y, L.DOOR_ARCADE.z, -Math.PI / 2, 'RA QUẢNG TRƯỜNG', '#ff9a3c', '#ff2d95', 0xd9ad4b);
   const markers = addInteractMarkers(root, L.INTERACT, L.heightAt);
   const extras = buildExtras(themeId, root);
 
