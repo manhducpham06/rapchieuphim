@@ -145,6 +145,15 @@ async function handleApi(req, res, url) {
 
   if (rateLimited(ip, 90, 60000)) return sendJson(res, 429, { error: 'Bạn thao tác quá nhanh, thử lại sau.' });
 
+  if (p === '/api/rooms' && req.method === 'GET') { // số người từng phòng cho sảnh chờ (công khai, không lộ tên)
+    const counts = {};
+    for (const [id, r] of rooms) counts[id] = r.players.size;
+    let shopOpen = false;
+    const sr = rooms.get('shop');
+    if (sr) for (const q of sr.players.values()) if (q.admin) { shopOpen = true; break; }
+    return sendJson(res, 200, { counts, shopOpen });
+  }
+
   if (p === '/api/config' && req.method === 'GET') return sendJson(res, 200, payments.publicConfig());
 
   if (p === '/api/order' && req.method === 'POST') {
