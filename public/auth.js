@@ -28,7 +28,7 @@ export async function initAuth(onChange) {
 
   const msg = (e) => {
     const c = (e && e.code) || '';
-    return ({
+    const M = {
       'auth/email-already-in-use': 'Email này đã có tài khoản. Hãy chuyển sang Đăng nhập.',
       'auth/invalid-email': 'Email chưa đúng định dạng.',
       'auth/weak-password': 'Mật khẩu quá yếu, cần ít nhất 6 ký tự.',
@@ -38,14 +38,21 @@ export async function initAuth(onChange) {
       'auth/user-not-found': 'Sai email hoặc mật khẩu.',
       'auth/too-many-requests': 'Thử quá nhiều lần, hãy đợi vài phút rồi thử lại.',
       'auth/network-request-failed': 'Mất kết nối mạng.',
-      'auth/operation-not-allowed': 'Chủ game chưa bật đăng nhập bằng email trong Firebase.',
-    })[c] || 'Có lỗi xảy ra (' + (c || 'không rõ') + ').';
+      'auth/operation-not-allowed': 'Chủ game chưa bật phương thức đăng nhập này trong Firebase.',
+      'auth/popup-closed-by-user': '',
+      'auth/cancelled-popup-request': '',
+      'auth/popup-blocked': 'Trình duyệt đã chặn cửa sổ đăng nhập Google. Hãy cho phép cửa sổ bật lên rồi thử lại.',
+      'auth/unauthorized-domain': 'Tên miền này chưa được thêm vào danh sách cho phép của Firebase (Authentication → Settings → Authorized domains).',
+      'auth/account-exists-with-different-credential': 'Email này đã đăng ký bằng mật khẩu. Hãy đăng nhập bằng email và mật khẩu.',
+    };
+    return c in M ? M[c] : 'Có lỗi xảy ra (' + (c || 'không rõ') + ').';
   };
 
   const userDoc = () => F.doc(db, 'users', auth.currentUser.uid);
 
   api.register = async (email, password, name) => {
     try {
+      await persist(true);
       const cr = await A.createUserWithEmailAndPassword(auth, email, password);
       await A.updateProfile(cr.user, { displayName: name });
       await cr.user.getIdToken(true); // nạp lại để token có tên hiển thị
@@ -54,8 +61,24 @@ export async function initAuth(onChange) {
       return { ok: true };
     } catch (e) { return { ok: false, error: msg(e) }; }
   };
-  api.login = async (email, password) => {
-    try { await A.signInWithEmailAndPassword(auth, email, password); return { ok: true }; } catch (e) { return { ok: false, error: msg(e) }; }
+  // remember = true: giữ đăng nhập lâu dài; false: chỉ trong tab này, đóng trình duyệt là thoát.
+  const persist = (remember) => A.setPersistence(auth, remember ? A.browserLocalPersistence : A.browserSessionPersistence).catch(() => {});
+  // Đăng nhập / đăng ký bằng Google (cần bật nhà cung cấp Google trong Firebase Authentication)
+  api.google = async () => {
+    try {
+      await persist(true);
+      const cr = await A.signInWithPopup(auth, new A.GoogleAuthProvider());
+      api.user = cr.user;
+      return { ok: true };
+    } catch (e) { return { ok: false, error: msg(e) }; }
+  };
+  api.login = async (email, password, remember = true) => {
+    try {
+      await persist(remember);
+      const cr = await A.signInWithEmailAndPassword(auth, email, password);
+      api.user = cr.user;
+      return { ok: true };
+    } catch (e) { return { ok: false, error: msg(e) }; }
   };
   api.reset = async (email) => {
     try { await A.sendPasswordResetEmail(auth, email); return { ok: true }; } catch (e) { return { ok: false, error: msg(e) }; }

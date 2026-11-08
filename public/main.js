@@ -23,7 +23,7 @@ const store = {
 const EMOTE_LIST = EMOTE_META;
 const mkAvatar = (lk) => (characterReady() ? createCharacter() : createAvatar(lk));
 let charState = 'loading';
-const charLoad = Promise.all([loadCharacter(), loadOutfitMask()]).then((r) => r[0]).then((ok) => { charState = ok ? 'ok' : 'fail'; if (ok && pv.r) rebuildPreview(); return ok; });
+const charLoad = Promise.all([loadCharacter(), loadOutfitMask()]).then((r) => r[0]).then((ok) => { charState = ok ? 'ok' : 'fail'; return ok; });
 const TOUCH = isTouchDevice();
 let RL = L.layoutOf('plaza'); // bố cục của phòng hiện tại
 let curRoom = L.ROOM_BY_ID.plaza;
@@ -42,6 +42,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 80);
 let world = buildPlaza(scene);
 let worldKey = 'plaza';
+
 
 // Lớp CSS3D chứa video YouTube, nằm phía sau canvas WebGL (nhìn xuyên qua "lỗ" trên màn hình)
 const css = new CSS3DRenderer({ element: $('css3d') });
@@ -95,28 +96,6 @@ const look = Object.assign({ shirt: 5, skin: 0, hair: 1, hat: 0 }, store.get('lo
 const C = L.LOOK_COUNTS;
 for (const k of Object.keys(C)) if (!(look[k] >= 0 && look[k] < C[k])) look[k] = 0;
 $('nameInput').value = store.get('name', '');
-
-const pv = { r: null, scene: null, cam: null, av: null };
-function initPreview() {
-  const cv = $('preview');
-  pv.r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
-  pv.r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  pv.r.setSize(cv.clientWidth || 240, cv.clientHeight || 300, false);
-  pv.scene = new THREE.Scene();
-  pv.scene.add(new THREE.HemisphereLight(0xffffff, 0x553355, 1.6));
-  const dl = new THREE.DirectionalLight(0xffffff, 1.6);
-  dl.position.set(2, 3, 4);
-  pv.scene.add(dl);
-  pv.cam = new THREE.PerspectiveCamera(32, (cv.clientWidth || 240) / (cv.clientHeight || 300), 0.1, 20);
-  pv.cam.position.set(0, 1.15, 4.1);
-  pv.cam.lookAt(0, 0.98, 0);
-  rebuildPreview();
-}
-function rebuildPreview() {
-  if (pv.av) pv.scene.remove(pv.av.group);
-  pv.av = mkAvatar(look);
-  pv.scene.add(pv.av.group);
-}
 
 // ====================== Trạng thái game ======================
 const me = { id: null, x: L.SPAWN.x, z: L.SPAWN.z, ry: Math.PI, seat: null, speed: 0, name: '' };
@@ -200,7 +179,7 @@ function connect() {
     if (joined) toast('Mất kết nối, đang thử vào lại…');
     clearPeers();
     if (!joined) setStatus('Không kết nối được máy chủ, đang thử lại…');
-    $('enterBtn').disabled = false; $('enterAcct').disabled = false;
+    setEntering(false);
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(connect, 2000);
   };
@@ -823,7 +802,7 @@ $('spkBtn').addEventListener('click', () => voice.setSpeaker(!voice.spk));
 
 // ====================== Phòng, ví xu, thời trang ======================
 const WELCOME = {
-  plaza: 'Chào mừng đến Phố Vui! Đi qua cổng để vào Rạp Chiếu Phim, Khu Giải Trí hoặc Shop Thời Trang.',
+  plaza: 'Chào mừng đến ChillGameZ! Đi qua cổng để vào Rạp Chiếu Phim, Khu Giải Trí hoặc Shop Thời Trang.',
   theater: 'Chào mừng đến Rạp Chiếu Phim! Bấm vào một ghế trống để ngồi xem, dán link YouTube ở mục Màn hình.',
   arcade: 'Chào mừng đến Khu Giải Trí! Chạy vào quả bóng để sút, lại gần máy game và bấm E / nút Chơi.',
   shop: 'Chào mừng đến Shop Thời Trang! Lại gần quầy để mua đồ, lại gần gương để thử đồ.',
@@ -1286,6 +1265,7 @@ function frame() {
   t_ += dt;
   const nowMs = performance.now();
 
+  if (!joined) return; // đang ở màn hình đăng nhập: không dựng cảnh 3D phía sau cho đỡ tốn máy
   if (joined) {
     updateSelf(dt);
     updatePeers(dt, nowMs);
@@ -1297,18 +1277,13 @@ function frame() {
   renderer.render(scene, camera);
   css.render(cssScene, camera);
 
-  if (pv.r && !$('join').hidden && pv.av) {
-    pv.av.group.rotation.y = Math.sin(t_ * 0.9) * 0.8;
-    pv.av.update(dt, { speed: 0, sitting: false, emote: { type: 'wave', until: Infinity }, now: nowMs, drop: 0 });
-    pv.r.render(pv.scene, pv.cam);
-  }
 }
 
 // ====================== Tài khoản & khởi động ======================
 let auth = { enabled: false };
 let acct = null;
 let tab = 'guest';
-const setStatus = (t, cls = '') => { const el = $('joinStatus'); el.textContent = t; el.className = 'status ' + cls; };
+const setStatus = (t, cls = '') => { const el = $('joinStatus'); el.textContent = t; el.className = 'cg-status ' + cls; };
 function showTab(t) {
   tab = t;
   document.querySelectorAll('#authTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
@@ -1317,21 +1292,21 @@ function showTab(t) {
 }
 function renderAuth() {
   const tabs = $('authTabs');
-  $('nameInput').hidden = !!acct;
   wal.showGuestCoin(!acct);
-  if (!auth.enabled) { tabs.hidden = true; showTab('guest'); $('guestNote').hidden = true; return; }
-  $('guestNote').hidden = false;
-  if (acct) {
-    tabs.hidden = true;
+  if (!auth.enabled) { // máy chủ chưa cấu hình tài khoản: vào bằng tên tạm
+    tabs.hidden = true; $('lbAcct').hidden = true; $('lbGuest').hidden = false;
+    showTab('lobby'); return;
+  }
+  if (acct) { // còn phiên đăng nhập cũ
+    tabs.hidden = true; $('lbGuest').hidden = true; $('lbAcct').hidden = false;
     const nm = acct.displayName || (acct.email || '').split('@')[0] || 'Người chơi';
     $('acctName').textContent = nm;
     $('acctMail').textContent = acct.email || '';
     $('acctInit').textContent = nm.trim().charAt(0).toUpperCase() || '?';
-    showTab('account');
+    showTab('lobby');
   } else {
     tabs.hidden = false;
-    showTab(tab === 'account' ? 'login' : tab === 'guest' && !$('authTabs').dataset.init ? 'login' : tab);
-    $('authTabs').dataset.init = '1';
+    showTab(tab === 'login' ? 'login' : 'register');
   }
 }
 async function onAuth(u) {
@@ -1339,36 +1314,56 @@ async function onAuth(u) {
   renderAuth();
 }
 document.querySelectorAll('#authTabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
-const busy = (btn, on) => { btn.disabled = on; };
+const busy = (btn, on) => { btn.disabled = on; btn.classList.toggle('loading', on); };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function flag(id, bad) { $(id).classList.toggle('bad', !!bad); const w = $(id).closest('.cg-in'); if (w) w.classList.toggle('bad', !!bad); return !bad; }
+function setEntering(on) {
+  busy($('enterBtn'), on);
+  $('logoutBtn').disabled = on;
+}
+for (const id of ['liEmail', 'liPass', 'rgName', 'rgEmail', 'rgPass', 'rgPass2']) $(id).addEventListener('input', () => flag(id, false));
 $('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const email = $('liEmail').value.trim(), pw = $('liPass').value;
-  if (!email || !pw) return setStatus('Hãy nhập email và mật khẩu.', 'err');
-  busy($('liBtn'), true); setStatus('Đang đăng nhập…');
-  const r = await auth.login(email, pw);
-  busy($('liBtn'), false);
-  setStatus(r.ok ? '' : r.error, r.ok ? '' : 'err');
+  const okE = flag('liEmail', !email), okP = flag('liPass', !pw);
+  if (!okE || !okP) return setStatus('Hãy nhập email và mật khẩu.', 'err');
+  if (!EMAIL_RE.test(email)) { flag('liEmail', true); return setStatus('Hãy nhập đúng email đã dùng khi đăng ký.', 'err'); }
+  busy($('liBtn'), true); setStatus('');
+  const r = await auth.login(email, pw, $('liRemember').checked);
+  if (!r.ok) { busy($('liBtn'), false); return setStatus(r.error, 'err'); }
+  acct = auth.user || acct; renderAuth(); setStatus('Đăng nhập thành công, đang vào thế giới…', 'ok'); busy($('liBtn'), false); enter(true);
 });
 $('regForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = $('rgName').value.replace(/[<>]/g, '').trim().slice(0, 16);
   const email = $('rgEmail').value.trim(), pw = $('rgPass').value;
-  if (!name) return setStatus('Hãy nhập tên hiển thị.', 'err');
-  if (!email) return setStatus('Hãy nhập email.', 'err');
-  if (pw.length < 6) return setStatus('Mật khẩu cần ít nhất 6 ký tự.', 'err');
-  if (pw !== $('rgPass2').value) return setStatus('Hai mật khẩu chưa giống nhau.', 'err');
-  busy($('rgBtn'), true); setStatus('Đang tạo tài khoản…');
+  if (name.length < 2) { flag('rgName', true); return setStatus('Tên người dùng cần ít nhất 2 ký tự.', 'err'); }
+  if (!EMAIL_RE.test(email)) { flag('rgEmail', true); return setStatus('Email chưa đúng định dạng.', 'err'); }
+  if (pw.length < 6) { flag('rgPass', true); return setStatus('Mật khẩu cần ít nhất 6 ký tự.', 'err'); }
+  if (pw !== $('rgPass2').value) { flag('rgPass2', true); return setStatus('Hai mật khẩu chưa giống nhau.', 'err'); }
+  busy($('rgBtn'), true); setStatus('');
   const r = await auth.register(email, pw, name);
-  busy($('rgBtn'), false);
-  if (r.ok) { acct = auth.user; renderAuth(); setStatus('Tạo tài khoản thành công!', 'ok'); } else setStatus(r.error, 'err');
+  if (!r.ok) { busy($('rgBtn'), false); return setStatus(r.error, 'err'); }
+  acct = auth.user; renderAuth(); setStatus('Tạo tài khoản thành công, đang vào thế giới…', 'ok'); busy($('rgBtn'), false); enter(true);
 });
 $('forgotBtn').addEventListener('click', async () => {
   const email = $('liEmail').value.trim();
-  if (!email) return setStatus('Nhập email vào ô trên rồi bấm lại “Quên mật khẩu”.', 'err');
+  if (!EMAIL_RE.test(email)) { flag('liEmail', true); return setStatus('Nhập email vào ô trên rồi bấm lại “Quên mật khẩu”.', 'err'); }
   const r = await auth.reset(email);
   setStatus(r.ok ? 'Đã gửi email đặt lại mật khẩu (xem cả hộp thư rác).' : r.error, r.ok ? 'ok' : 'err');
 });
 $('logoutBtn').addEventListener('click', async () => { await auth.logout(); });
+document.querySelectorAll('[data-google]').forEach((b) => b.addEventListener('click', async () => {
+  if (!auth.google) return setStatus('Đăng nhập Google chưa sẵn sàng.', 'err');
+  document.querySelectorAll('[data-google]').forEach((x) => (x.disabled = true));
+  setStatus('');
+  const r = await auth.google();
+  document.querySelectorAll('[data-google]').forEach((x) => (x.disabled = false));
+  if (!r.ok) { if (r.error) setStatus(r.error, 'err'); return; }
+  acct = auth.user || acct; renderAuth();
+  setStatus('Đăng nhập thành công, đang vào thế giới…', 'ok');
+  enter(true);
+}));
 
 function enter(asAccount) {
   let name;
@@ -1380,54 +1375,18 @@ function enter(asAccount) {
   }
   me.name = name;
   store.set('look', look);
-  $('enterBtn').disabled = true; $('enterAcct').disabled = true;
+  setEntering(true);
   setStatus(charState === 'loading' ? 'Đang tải nhân vật…' : 'Đang vào thế giới…');
   charLoad.then(() => { setStatus('Đang vào thế giới…'); connect(); });
 }
 $('enterBtn').addEventListener('click', () => enter(!!acct));
-$('enterAcct').addEventListener('click', () => enter(true));
-$('nameInput').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') enter(false); });
+$('nameInput').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') enter(!!acct); });
 for (const id of ['liEmail', 'liPass', 'rgName', 'rgEmail', 'rgPass', 'rgPass2']) $(id).addEventListener('keydown', (e) => e.stopPropagation());
 
-showTab('guest');
+showTab('register');
 initAuth(onAuth).then((a) => {
   auth = a;
   if (a.error) setStatus(a.error, 'err');
   renderAuth();
 });
-initPreview();
 frame();
-
-// ====================== Màn hình chờ: phong cảnh, menu, số người online ======================
-(function landing() {
-  const svg = $('ldCity');
-  if (svg) {
-    let seed = 7;
-    const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
-    let out = '';
-    for (const [layer, fill, wmin, hmax] of [[0, '#8fb4e6', 50, 230], [1, '#6a8fd0', 60, 300], [2, '#4a6fb8', 70, 360]]) {
-      let x = -20 + layer * 15;
-      while (x < 1620) {
-        const w = wmin + rnd() * 70, h = 90 + rnd() * (hmax - 90);
-        out += `<rect x="${x.toFixed(0)}" y="${(400 - h).toFixed(0)}" width="${w.toFixed(0)}" height="${h.toFixed(0)}" fill="${fill}" opacity="${0.55 + layer * 0.2}"/>`;
-        if (layer > 0) for (let wy = 400 - h + 14; wy < 392; wy += 22) for (let wx = x + 8; wx < x + w - 10; wx += 16) if (rnd() > 0.62) out += `<rect x="${wx.toFixed(0)}" y="${wy.toFixed(0)}" width="7" height="10" fill="#ffeeb0" opacity=".85"/>`;
-        x += w + 4 + rnd() * 14;
-      }
-    }
-    svg.innerHTML = out;
-  }
-  const scroll = (id) => { const el = $(id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
-  document.querySelectorAll('.ld-nav [data-go], .ld-tile[data-go]').forEach((a) => a.addEventListener('click', (e) => {
-    e.preventDefault();
-    const g = a.dataset.go;
-    if (g === 'help') $('help').hidden = false;
-    else if (g === 'top') $('join').scrollTo({ top: 0, behavior: 'smooth' });
-    else scroll('ldTiles');
-    document.querySelectorAll('.ld-nav nav a').forEach((x) => x.classList.toggle('on', x === a));
-  }));
-  async function online() {
-    try { const j = await (await fetch('/healthz', { cache: 'no-store' })).json(); $('ldOnline').textContent = j.online ?? j.players ?? 0; } catch {}
-  }
-  online();
-  setInterval(() => { if (!$('join').hidden) online(); }, 10000);
-})();
