@@ -143,7 +143,7 @@ function makePeer(p, isMe = false) {
   if (av.setOutfit && p.o) av.setOutfit(p.o);
   const peer = {
     id: p.id, name: p.name, look: p.look, av, label, bubble: null, bubbleUntil: 0, emote: null, floats: [],
-    x: p.x, z: p.z, ry: p.ry, tx: p.x, tz: p.z, try_: p.ry, seat: p.seat ?? null, speed: 0, isMe,
+    x: p.x, z: p.z, ry: p.ry, tx: p.x, tz: p.z, try_: p.ry, seat: p.seat ?? null, speed: 0, isMe, own: !!p.own,
   };
   const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0x4cff8a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
   ring.rotation.x = -Math.PI / 2;
@@ -208,6 +208,17 @@ function connect() {
 }
 setInterval(() => send({ t: 'ping', t0: Date.now() }), 5000);
 
+function shopIsOpen() {
+  if (curRoom.kind !== 'shop') return true; // mở từ nơi khác: để server quyết định
+  for (const p of peers.values()) if (p.own) return true;
+  return false;
+}
+function syncShopOwner() {
+  if (!world.setOwnerVisible) return;
+  let real = false;
+  for (const p of peers.values()) if (p.own) { real = true; break; }
+  world.setOwnerVisible(!real);
+}
 function clearPeers() {
   for (const p of peers.values()) removePeerVisual(p);
   peers.clear();
@@ -252,6 +263,7 @@ function onMessage(m) {
       }
       const s = peers.get(m.id);
       me.x = s.x; me.z = s.z; me.ry = s.ry; me.seat = null;
+      syncShopOwner();
       camSnap();
       $('chatLog').innerHTML = '';
       m.chat.forEach((c) => addChat(c.name, c.text, c.id === me.id, true));
@@ -275,6 +287,7 @@ function onMessage(m) {
       if (peers.has(m.player.id)) return;
       peers.set(m.player.id, makePeer(m.player));
       if (m.player.seat !== null) seatOwner.set(m.player.seat, m.player.id);
+      syncShopOwner();
       updateOnline();
       return;
     }
@@ -285,6 +298,7 @@ function onMessage(m) {
       voice.peerLeft(m.id);
       peers.delete(m.id);
       for (const [s, id] of seatOwner) if (id === m.id) seatOwner.delete(s);
+      syncShopOwner();
       updateOnline();
       return;
     }
@@ -895,7 +909,11 @@ function act() {
   if (nearest) {
     if (nearest.type === 'game') { games.open(nearest.game); closePanel(); }
     else if (nearest.type === 'door') goRoom(nearest.go);
-    else if (nearest.type === 'shop') { closePanel(); wal.open('shop'); }
+    else if (nearest.type === 'shop') {
+      closePanel();
+      if (!shopIsOpen()) { toast('Shop đang đóng cửa — ông chủ đang vắng.'); return; }
+      wal.open('shop');
+    }
     else if (nearest.type === 'wardrobe') { closePanel(); wal.open('ward'); }
     return;
   }

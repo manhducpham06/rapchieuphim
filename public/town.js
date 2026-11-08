@@ -294,6 +294,12 @@ export function buildShop(scene, makeOwner) {
   }
   ownerTag.position.set(S.OWNER.x, 2.5, S.OWNER.z);
   root.add(ownerTag);
+  // Chỉ chủ shop thật mới bán hàng. NPC luôn ẩn; khi chủ vắng thì hiện biển đóng cửa.
+  if (owner) owner.group.visible = false;
+  ownerTag.visible = false;
+  const closedSign = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 1.2), basic(0xffffff, { map: signTex('SHOP ĐANG ĐÓNG CỬA', '#ff5a5a', '#2a0f12', 1024, 340, 100), toneMapped: false }));
+  closedSign.position.set(S.OWNER.x, 1.9, S.COUNTER.z);
+  root.add(closedSign);
 
   // giá treo quần áo
   const topItems = C.ITEMS.filter((i) => i.slot === 'top');
@@ -389,6 +395,13 @@ export function buildShop(scene, makeOwner) {
   }
   return {
     kind: 'shop', update, pickables: [], seatFromHit: () => null, setMarker() {},
+    // Ẩn ông chủ NPC khi chủ shop thật đang ở trong phòng
+    // v = true: chủ shop thật có mặt (mở cửa). v = false: hiện NPC không, chỉ hiện biển đóng cửa.
+    setOwnerVisible(v) {
+      if (owner) owner.group.visible = false;
+      ownerTag.visible = false;
+      closedSign.visible = !v;
+    },
     dispose() { if (owner && owner.dispose) owner.dispose(); disposeTree(root); },
   };
 }
