@@ -642,6 +642,13 @@ function handle(c, msg) {
     case 'buy': {
       if (!c.uid) return c.send({ t: 'err', text: 'Bạn cần đăng nhập để mua đồ.' });
       if (!c.allow('buy', 400)) return;
+      {
+        // Shop chỉ bán khi chủ shop (admin) đang đứng trong phòng shop.
+        const shopRoom = rooms.get('shop');
+        let open = false;
+        if (shopRoom) for (const q of shopRoom.players.values()) if (q.admin) { open = true; break; }
+        if (!open) return c.send({ t: 'buyres', ok: false, item: String(msg.item || ''), error: 'Shop đang đóng cửa, ông chủ đang vắng. Quay lại sau nhé!', short: false });
+      }
       wallet.buy(c.uid, String(msg.item || '')).then((r) => {
         if (!c.alive) return;
         if (r.w) { c.wallet = r.w; c.send({ t: 'wallet', w: r.w }); }
