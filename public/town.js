@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { makeLabel } from './avatar.js';
 import { makeDoor, addInteractMarkers, disposeTree } from './themes.js';
 import { buildAccessory } from './accessories.js';
+import { decoratePlaza } from './plaza3d.js';
 
 const L = window.LAYOUT;
 const PI = Math.PI;
@@ -140,12 +141,15 @@ export function buildPlaza(scene) {
     jets.push({ m: d, a: (k / 14) * PI * 2, ph: k * 0.37 });
   }
 
+  // Đồ dựng bằng code: sẽ ẩn đi khi mô hình 3D thật tải xong (xem plaza3d.js)
+  const fallback = new THREE.Group();
+  root.add(fallback);
   // cây
   for (const tr of P.TREES) {
-    cyl(0.18, 0.26, 2.4, std(0x6b4a2b), tr.x, 1.2, tr.z, root, 8);
-    sph(1.3, std(0x3f9d4a), tr.x, 3.1, tr.z, root);
-    sph(0.95, std(0x4fb55a), tr.x + 0.6, 3.7, tr.z + 0.2, root);
-    sph(0.9, std(0x378f43), tr.x - 0.6, 3.5, tr.z - 0.3, root);
+    cyl(0.18, 0.26, 2.4, std(0x6b4a2b), tr.x, 1.2, tr.z, fallback, 8);
+    sph(1.3, std(0x3f9d4a), tr.x, 3.1, tr.z, fallback);
+    sph(0.95, std(0x4fb55a), tr.x + 0.6, 3.7, tr.z + 0.2, fallback);
+    sph(0.9, std(0x378f43), tr.x - 0.6, 3.5, tr.z - 0.3, fallback);
   }
   // ghế đá
   for (const b of P.BENCHES) {
@@ -156,8 +160,8 @@ export function buildPlaza(scene) {
   // cột đèn
   const lampMat = basic(0xfff2b0, { toneMapped: false });
   for (const [lx, lz] of [[-12, 12], [12, 12], [-12, -12], [12, -12], [0, 17], [-17, 17], [17, 17]]) {
-    cyl(0.07, 0.1, 4.2, std(0x2e3340, { metalness: 0.6 }), lx, 2.1, lz, root, 8);
-    sph(0.28, lampMat, lx, 4.35, lz, root);
+    cyl(0.07, 0.1, 4.2, std(0x2e3340, { metalness: 0.6 }), lx, 2.1, lz, fallback, 8);
+    sph(0.28, lampMat, lx, 4.35, lz, fallback);
   }
 
   // mặt tiền 3 toà nhà
@@ -193,9 +197,12 @@ export function buildPlaza(scene) {
     const r = 52 + (i % 4) * 6;
     const h = 14 + ((i * 7) % 5) * 7;
     const w = 7 + (i % 3) * 3;
-    const b = box(w, h, w, std(0xffffff, { map: facadeTex(['#5a6a8a', '#7a6a8a', '#8a7a6a', '#4a6a7a'][i % 4], i + 5) }), Math.cos(a) * r, h / 2 - 0.5, Math.sin(a) * r, root);
+    const b = box(w, h, w, std(0xffffff, { map: facadeTex(['#5a6a8a', '#7a6a8a', '#8a7a6a', '#4a6a7a'][i % 4], i + 5) }), Math.cos(a) * r, h / 2 - 0.5, Math.sin(a) * r, fallback);
     b.rotation.y = -a;
   }
+
+  let gone = false;
+  decoratePlaza(root, P, () => { if (!gone) fallback.visible = false; }).catch(() => {});
 
   function update(dt, t) {
     jets.forEach((j) => {
@@ -208,7 +215,7 @@ export function buildPlaza(scene) {
     doors.forEach((d) => d.update(t));
     markers.update(t, false);
   }
-  return { kind: 'plaza', update, pickables: [], seatFromHit: () => null, setMarker() {}, dispose: () => disposeTree(root) };
+  return { kind: 'plaza', update, pickables: [], seatFromHit: () => null, setMarker() {}, dispose: () => { gone = true; disposeTree(root); } };
 }
 
 // ===================================================================
