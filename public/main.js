@@ -1431,9 +1431,11 @@ $('nameInput').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.k
 for (const id of ['liEmail', 'liPass', 'rgName', 'rgEmail', 'rgPass', 'rgPass2']) $(id).addEventListener('keydown', (e) => e.stopPropagation());
 
 showTab('register');
-initAuth(onAuth).then((a) => {
-  auth = a;
-  if (a.error) setStatus(a.error, 'err');
-  renderAuth();
-});
+{ // hiện sẵn khung đăng ký/đăng nhập; nếu dịch vụ đăng nhập chậm hoặc lỗi thì vẫn dùng được
+  let authDone = false;
+  $('authTabs').hidden = false;
+  const fin = (a) => { if (authDone) return; authDone = true; auth = a; if (a.error) setStatus(a.error, 'err'); renderAuth(); };
+  setTimeout(() => { if (!authDone) { $('authTabs').hidden = false; setStatus('Đang kết nối dịch vụ đăng nhập…', ''); } }, 6000);
+  initAuth(onAuth).then(fin, () => fin({ enabled: false, error: 'Không tải được dịch vụ đăng nhập.' }));
+}
 frame();

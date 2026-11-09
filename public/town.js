@@ -119,69 +119,19 @@ export function buildPlaza(scene) {
   grass.rotation.x = -PI / 2;
   grass.position.y = -0.03;
   root.add(grass);
-  // vòng hoa quanh đài phun nước
-  const ring = new THREE.Mesh(new THREE.RingGeometry(4.2, 5.4, 48), std(0x3fae4f, { roughness: 1 }));
-  ring.rotation.x = -PI / 2; ring.position.y = 0.02;
-  root.add(ring);
-  for (let k = 0; k < 28; k++) {
-    const a = (k / 28) * PI * 2;
-    sph(0.2, std(k % 2 ? 0xff6fa5 : 0xffd23f), Math.cos(a) * 4.8, 0.2, Math.sin(a) * 4.8, root);
-  }
-
-  // đài phun nước
-  const fountain = new THREE.Group();
-  root.add(fountain);
-  cyl(3.3, 3.5, 0.55, std(0xcfd3d9, { roughness: 0.5 }), 0, 0.27, 0, fountain, 40);
-  const water = cyl(3.0, 3.0, 0.1, std(0x3aa8ff, { roughness: 0.15, metalness: 0.2, emissive: 0x0b4a8a, emissiveIntensity: 0.5, transparent: true, opacity: 0.85 }), 0, 0.5, 0, fountain, 40);
-  cyl(0.35, 0.5, 1.6, std(0xdadfe6), 0, 1.3, 0, fountain, 16);
-  cyl(1.3, 0.5, 0.25, std(0xcfd3d9), 0, 2.1, 0, fountain, 28);
-  const jets = [];
-  for (let k = 0; k < 14; k++) {
-    const d = sph(0.09, basic(0xbfe6ff, { transparent: true, opacity: 0.9 }), 0, 2.2, 0, fountain);
-    jets.push({ m: d, a: (k / 14) * PI * 2, ph: k * 0.37 });
-  }
-
-  // Đồ dựng bằng code: sẽ ẩn đi khi mô hình 3D thật tải xong (xem plaza3d.js)
-  const fallback = new THREE.Group();
-  root.add(fallback);
-  // cây
-  for (const tr of P.TREES) {
-    cyl(0.18, 0.26, 2.4, std(0x6b4a2b), tr.x, 1.2, tr.z, fallback, 8);
-    sph(1.3, std(0x3f9d4a), tr.x, 3.1, tr.z, fallback);
-    sph(0.95, std(0x4fb55a), tr.x + 0.6, 3.7, tr.z + 0.2, fallback);
-    sph(0.9, std(0x378f43), tr.x - 0.6, 3.5, tr.z - 0.3, fallback);
-  }
-  // ghế đá
-  for (const b of P.BENCHES) {
-    box(2.3, 0.12, 0.7, std(0x9a6b3c), b.x, 0.5, b.z, root);
-    box(2.3, 0.5, 0.1, std(0x9a6b3c), b.x, 0.85, b.z - 0.3, root);
-    for (const sx of [-1, 1]) box(0.12, 0.5, 0.65, std(0x333844, { metalness: 0.5 }), b.x + sx * 1.05, 0.25, b.z, root);
-  }
-  // cột đèn
-  const lampMat = basic(0xfff2b0, { toneMapped: false });
-  for (const [lx, lz] of [[-12, 12], [12, 12], [-12, -12], [12, -12], [0, 17], [-17, 17], [17, 17]]) {
-    cyl(0.07, 0.1, 4.2, std(0x2e3340, { metalness: 0.6 }), lx, 2.1, lz, fallback, 8);
-    sph(0.28, lampMat, lx, 4.35, lz, fallback);
-  }
-
-  // mặt tiền 3 toà nhà
-  function building(x, z, ry, w, h, color, seed, signText, signColor, signBg) {
+  // Toàn bộ nhà, cây, đèn, đá, hoa là mô hình 3D thật, dựng trong plaza3d.js (va chạm lấy từ layout.js).
+  // Biển hiệu trên 3 toà nhà chính
+  function signOn(x, z, ry, text, color, bg) {
     const g = new THREE.Group();
     g.position.set(x, 0, z); g.rotation.y = ry;
-    box(w, h, 3, std(0xffffff, { map: facadeTex(color, seed), roughness: 0.85 }), 0, h / 2, -1.5, g);
-    box(w + 0.6, 0.5, 3.4, std(0x333a4a), 0, h + 0.25, -1.5, g);
-    // biển hiệu
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.62, w * 0.62 / 4), basic(0xffffff, { map: signTex(signText, signColor, signBg), toneMapped: false }));
-    sign.position.set(0, 5.6, 0.02);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(10, 2.5), basic(0xffffff, { map: signTex(text, color, bg), toneMapped: false }));
+    sign.position.set(0, 6.4, 0);
     g.add(sign);
-    // mái hiên cạnh cửa
-    box(5.6, 0.2, 1.8, std(signColor === '#ff9a3c' ? 0xd9652a : 0x8a2f4f), 0, 4.3, 0.7, g);
     root.add(g);
-    return g;
   }
-  building(0, -19.2, 0, 22, 12, '#7b3f55', 1, 'RẠP CHIẾU PHIM', '#ffd24a', '#1a1030');
-  building(19.2, 0, -PI / 2, 22, 11, '#2c3f7a', 2, 'KHU GIẢI TRÍ', '#2ee6ff', '#0d0a22');
-  building(-19.2, 0, PI / 2, 22, 11, '#7a3b6c', 3, 'SHOP THỜI TRANG', '#ff7ec7', '#2a0f26');
+  signOn(0, -19.62, 0, 'RẠP CHIẾU PHIM', '#ffd24a', '#1a1030');
+  signOn(19.62, 0, -PI / 2, 'KHU GIẢI TRÍ', '#2ee6ff', '#0d0a22');
+  signOn(-19.62, 0, PI / 2, 'SHOP THỜI TRANG', '#ff7ec7', '#2a0f26');
 
   // cổng
   const doors = [
@@ -191,31 +141,14 @@ export function buildPlaza(scene) {
   ];
   const markers = addInteractMarkers(root, P.INTERACT, () => 0);
 
-  // đường chân trời: toà nhà xa
-  for (let i = 0; i < 26; i++) {
-    const a = (i / 26) * PI * 2 + 0.1;
-    const r = 52 + (i % 4) * 6;
-    const h = 14 + ((i * 7) % 5) * 7;
-    const w = 7 + (i % 3) * 3;
-    const b = box(w, h, w, std(0xffffff, { map: facadeTex(['#5a6a8a', '#7a6a8a', '#8a7a6a', '#4a6a7a'][i % 4], i + 5) }), Math.cos(a) * r, h / 2 - 0.5, Math.sin(a) * r, fallback);
-    b.rotation.y = -a;
-  }
-
-  let gone = false;
-  decoratePlaza(root, P, () => { if (!gone) fallback.visible = false; }).catch(() => {});
+  decoratePlaza(root, P).catch((e) => console.warn('Không tải được mô hình quảng trường', e));
 
   function update(dt, t) {
-    jets.forEach((j) => {
-      const u = (t * 0.9 + j.ph) % 1;
-      const rr = 0.2 + u * 1.9;
-      j.m.position.set(Math.cos(j.a) * rr, 2.25 + Math.sin(u * PI) * 1.5 - u * 0.3, Math.sin(j.a) * rr);
-    });
-    water.material.emissiveIntensity = 0.45 + 0.1 * Math.sin(t * 2);
     clouds.forEach((c, i) => { c.position.x += dt * (0.4 + (i % 3) * 0.15); if (c.position.x > 70) c.position.x = -70; });
     doors.forEach((d) => d.update(t));
     markers.update(t, false);
   }
-  return { kind: 'plaza', update, pickables: [], seatFromHit: () => null, setMarker() {}, dispose: () => { gone = true; disposeTree(root); } };
+  return { kind: 'plaza', update, pickables: [], seatFromHit: () => null, setMarker() {}, dispose: () => disposeTree(root) };
 }
 
 // ===================================================================

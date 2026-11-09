@@ -32,32 +32,30 @@ function load(name) {
   return cache.get(name);
 }
 
-/** Dựng thêm cảnh 3D quanh quảng trường. Trả về { ok, hide: [nhóm đồ code cần ẩn] } */
-export async function decoratePlaza(root, P, hideWhenReady) {
-  const NAMES = [
+/** Dựng toàn bộ cảnh 3D của quảng trường bằng mô hình thật (nhà, đường, cây, đèn, đá, chậu hoa). */
+export async function decoratePlaza(root, P) {
+  const NAMES = new Set([
     'building-a', 'building-b', 'building-c', 'building-d', 'building-e', 'building-f', 'building-g', 'building-h',
     'building-i', 'building-j', 'building-k', 'building-l', 'building-m', 'building-n',
     'building-skyscraper-a', 'building-skyscraper-b', 'building-skyscraper-c', 'building-skyscraper-d', 'building-skyscraper-e',
     'low-detail-building-a', 'low-detail-building-b', 'low-detail-building-c', 'low-detail-building-d', 'low-detail-building-e', 'low-detail-building-f',
-    'road-straight', 'road-crossroad', 'road-bend', 'light-square', 'light-curved',
-    'tree_default', 'tree_oak', 'tree_fat', 'tree_simple', 'tree_detailed', 'tree_pineRoundA',
-    'plant_bush', 'plant_bushLarge', 'flower_redA', 'flower_redB', 'flower_yellowA', 'flower_yellowB', 'flower_purpleA', 'flower_purpleB',
-    'statue_column', 'pot_large', 'rock_smallA', 'stone_largeA',
-  ];
+    'road-straight', 'road-bend', 'plant_bush', 'plant_bushLarge',
+    'flower_redA', 'flower_redB', 'flower_yellowA', 'flower_yellowB', 'flower_purpleA', 'flower_purpleB', 'rock_smallA',
+  ]);
+  P.PROPS.forEach((o) => NAMES.add(o.m));
   const models = {};
-  await Promise.all(NAMES.map(async (n) => { models[n] = await load(n); }));
-  if (!models['building-a'] || !models['road-straight'] || !models['tree_default']) return false;
+  await Promise.all([...NAMES].map(async (n) => { models[n] = await load(n); }));
 
   const g = new THREE.Group();
   root.add(g);
-  const put = (name, x, z, ry = 0, s = 1, y = 0) => {
+  const put = (name, x, z, ry = 0, s = 1, y = 0, parent = g) => {
     const m = models[name];
     if (!m) return null;
     const o = m.clone(true);
     o.position.set(x, y, z);
     o.rotation.y = ry;
     o.scale.setScalar(s);
-    g.add(o);
+    parent.add(o);
     return o;
   };
   let seed = 7;
@@ -65,76 +63,58 @@ export async function decoratePlaza(root, P, hideWhenReady) {
   const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
   const PI = Math.PI;
 
-  // ---- đường vòng quanh quảng trường (ô 4m) ----
-  const T = 4, RC = 26; // tâm đường cách gốc 26m
-  for (let i = -RC; i <= RC; i += T) {
-    for (const [x, z, ry] of [[i, -RC, 0], [i, RC, 0], [-RC, i, PI / 2], [RC, i, PI / 2]]) {
-      if (Math.abs(i) === RC) continue; // góc làm riêng
-      put('road-straight', x, z, ry, T, 0.01);
-    }
+  // ---- đồ vật trong quảng trường (cùng danh sách với va chạm trong layout.js) ----
+  P.PROPS.forEach((o) => put(o.m, o.x, o.z, o.ry !== undefined ? o.ry : rnd() * PI * 2, o.s));
+
+  // ---- 3 toà nhà chính (cửa vào rạp / khu giải trí / shop) ----
+  // Mỗi mặt tiền: nhà giữa to + hai nhà hai bên. Mặt trước nằm ở khoảng cách 19.75 so với tâm.
+  const FRONT = 19.75;
+  const facade = (x, z, ry, centre, sideL, sideR) => {
+    const f = new THREE.Group();
+    f.position.set(x, 0, z);
+    f.rotation.y = ry;
+    g.add(f);
+    const wid = (n, s) => ({ 'building-n': 2.32, 'building-k': 2.08, 'building-j': 2.08, 'building-i': 1.24, 'building-m': 1.24, 'building-l': 1.37, 'building-e': 1.64, 'building-g': 0.97 }[n] || 1) * s;
+    const dep = (n, s) => ({ 'building-n': 1.82, 'building-k': 0.94, 'building-j': 1.34, 'building-i': 1.3, 'building-m': 1.24, 'building-l': 1.4, 'building-e': 1.01, 'building-g': 0.92 }[n] || 1) * s;
+    const [cn, cs] = centre;
+    put(cn, 0, -dep(cn, cs) / 2, 0, cs, 0, f);
+    let off = wid(cn, cs) / 2;
+    for (const [n, s] of sideR) { off += wid(n, s) / 2; put(n, off, -dep(n, s) / 2, 0, s, 0, f); off += wid(n, s) / 2; }
+    off = wid(cn, cs) / 2;
+    for (const [n, s] of sideL) { off += wid(n, s) / 2; put(n, -off, -dep(n, s) / 2, 0, s, 0, f); off += wid(n, s) / 2; }
+  };
+  facade(0, -FRONT, 0, ['building-n', 7], [['building-k', 7], ['building-i', 7]], [['building-j', 7], ['building-m', 7]]); // rạp (phía bắc)
+  facade(FRONT, 0, -PI / 2, ['building-j', 7.5], [['building-i', 7.5], ['building-g', 7.5]], [['building-k', 7.5], ['building-l', 7.5]]); // khu giải trí (đông)
+  facade(-FRONT, 0, PI / 2, ['building-n', 6.5], [['building-j', 6.5], ['building-l', 6.5]], [['building-k', 6.5], ['building-m', 6.5]]); // shop (tây)
+
+  // ---- đường vòng + hai dãy nhà phía ngoài ----
+  const T = 4, RC = 32;
+  for (let i = -RC + T; i <= RC - T; i += T) {
+    for (const [x, z, ry] of [[i, -RC, 0], [i, RC, 0], [-RC, i, PI / 2], [RC, i, PI / 2]]) put('road-straight', x, z, ry, T, 0.01);
   }
   for (const [x, z, ry] of [[-RC, -RC, 0], [RC, -RC, PI / 2], [RC, RC, PI], [-RC, RC, -PI / 2]]) put('road-bend', x, z, ry, T, 0.01);
-
-  // ---- hai dãy nhà ngoài đường: cao dần về phía xa ----
-  const MID = ['building-a', 'building-b', 'building-c', 'building-d', 'building-e', 'building-f', 'building-g', 'building-h', 'building-i', 'building-j', 'building-k', 'building-l', 'building-m', 'building-n'];
+  const MID = ['building-a', 'building-b', 'building-c', 'building-d', 'building-f', 'building-g', 'building-h', 'building-l', 'building-m'];
   const SKY = ['building-skyscraper-a', 'building-skyscraper-b', 'building-skyscraper-c', 'building-skyscraper-d', 'building-skyscraper-e'];
   const LOW = ['low-detail-building-a', 'low-detail-building-b', 'low-detail-building-c', 'low-detail-building-d', 'low-detail-building-e', 'low-detail-building-f'];
-  // dãy sát đường (cách 32m) + dãy xa (cách 44m)
-  for (const side of [0, 1, 2, 3]) {
-    const ry = [0, PI / 2, PI, -PI / 2][side]; // mặt nhà quay vào quảng trường
-    for (let t = -36; t <= 36; t += 6.2) {
-      const near = 33.5 + rnd() * 0.6;
-      const far = 46 + rnd() * 3;
-      const place = (d, name, s) => {
+  for (let side = 0; side < 4; side++) {
+    const ry = [0, PI / 2, PI, -PI / 2][side];
+    for (let t = -44; t <= 44; t += 6.4) {
+      for (const [d, nm, s] of [[39.5 + rnd(), pick(MID), 6.2], [52 + rnd() * 3, rnd() > 0.4 ? pick(SKY) : pick(MID), 7]]) {
         const [x, z] = side === 0 ? [t, -d] : side === 1 ? [d, t] : side === 2 ? [t, d] : [-d, t];
-        put(name, x, z, ry, s);
-      };
-      place(near, pick(MID), 6.2);
-      place(far, rnd() > 0.5 ? pick(SKY) : pick(MID), rnd() > 0.5 ? 6.5 : 7.5);
+        put(nm, x, z, ry, s);
+      }
     }
   }
-  // nhà thấp lấp khoảng trống xa hơn nữa
-  for (let k = 0; k < 28; k++) {
-    const a = (k / 28) * PI * 2;
-    put(pick(LOW), Math.cos(a) * 64, Math.sin(a) * 64, -a + PI / 2, 9 + rnd() * 4);
-  }
+  for (let k = 0; k < 24; k++) { const a = (k / 24) * PI * 2; put(pick(LOW), Math.cos(a) * 66, Math.sin(a) * 66, -a + PI / 2, 10 + rnd() * 4); }
 
-  // ---- hai bên 3 toà chính: nhà nhỏ khép góc quảng trường ----
-  const corner = (x, z, ry, name) => put(name, x, z, ry, 6.5);
-  corner(-16, -21, 0, 'building-c'); corner(16, -21, 0, 'building-f');
-  corner(21, -16, -PI / 2, 'building-h'); corner(21, 16, -PI / 2, 'building-k');
-  corner(-21, -16, PI / 2, 'building-b'); corner(-21, 16, PI / 2, 'building-m');
+  // ---- cây và bụi hai bên, phía sau người chơi (ngoài vùng đi lại) ----
+  const TR = ['tree_default', 'tree_oak', 'tree_fat', 'tree_detailed'];
+  for (let x = -26; x <= 26; x += 5.2) put(pick(TR), x + (rnd() - 0.5) * 1.4, 23.5 + rnd() * 2.5, rnd() * 6, 4);
+  for (let z = -24; z <= 24; z += 5.2) { if (Math.abs(z) < 12) continue; put(pick(TR), 23.5, z, rnd() * 6, 4); put(pick(TR), -23.5, z, rnd() * 6, 4); }
 
-  // ---- cây quanh quảng trường: thay cây dựng bằng code ----
-  const TREES = ['tree_default', 'tree_oak', 'tree_fat', 'tree_detailed'];
-  P.TREES.forEach((tr, i) => put(TREES[i % TREES.length], tr.x, tr.z, rnd() * PI * 2, 3.6));
-  // hàng cây ven rìa phía nam (phía sau người chơi) và hai bên
-  for (let x = -18; x <= 18; x += 6) put(pick(TREES), x + (rnd() - 0.5) * 1.4, 22.5, rnd() * 6, 3.4);
-  for (let z = -18; z <= 18; z += 6) {
-    if (Math.abs(z) < 4) continue;
-    put(pick(TREES), -22.5, z, rnd() * 6, 3.4);
-    put(pick(TREES), 22.5, z, rnd() * 6, 3.4);
-  }
-  // bụi cây, hoa quanh đài phun nước và mép bãi
-  for (let k = 0; k < 16; k++) {
-    const a = (k / 16) * PI * 2 + 0.2;
-    put(k % 2 ? 'plant_bush' : 'plant_bushLarge', Math.cos(a) * 6.2, Math.sin(a) * 6.2, rnd() * 6, 3);
-  }
+  // ---- hoa, bụi cây quanh gốc cây lớn giữa quảng trường (đi xuyên được, chỉ để trang trí) ----
+  for (let k = 0; k < 14; k++) { const a = (k / 14) * PI * 2 + 0.2; put(k % 2 ? 'plant_bush' : 'plant_bushLarge', Math.cos(a) * 2.6, Math.sin(a) * 2.6, rnd() * 6, 3.2); }
   const FL = ['flower_redA', 'flower_redB', 'flower_yellowA', 'flower_yellowB', 'flower_purpleA', 'flower_purpleB'];
-  for (let k = 0; k < 90; k++) {
-    const a = rnd() * PI * 2, r = 5.4 + rnd() * 1.4;
-    put(pick(FL), Math.cos(a) * r, Math.sin(a) * r, rnd() * 6, 3.2);
-  }
-  // chậu cây, đá cảnh
-  for (const [x, z] of [[-4.5, -15], [4.5, -15], [-15, -4.5], [-15, 4.5], [15, -4.5], [15, 4.5]]) put('pot_large', x, z, 0, 3);
-  for (const [x, z] of [[-17, 8], [17, 8], [-10, 17.5], [10, 17.5]]) put('rock_smallA', x, z, rnd() * 6, 3);
-
-  // ---- đèn đường dọc rìa quảng trường ----
-  for (const [lx, lz, ry] of [[-12, 12, PI], [12, 12, PI], [-12, -12, 0], [12, -12, 0], [0, 17, PI], [-17, 17, PI], [17, 17, PI]]) {
-    put('light-curved', lx, lz, ry, 7, 0);
-  }
-
-  // mô hình thật đã sẵn sàng: ẩn đồ dựng bằng code
-  if (hideWhenReady) hideWhenReady();
+  for (let k = 0; k < 70; k++) { const a = rnd() * PI * 2, r = 3.2 + rnd() * 1.6; put(pick(FL), Math.cos(a) * r, Math.sin(a) * r, rnd() * 6, 3.2); }
   return true;
 }
