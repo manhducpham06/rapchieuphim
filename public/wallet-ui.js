@@ -6,8 +6,8 @@ import { icon } from './icons.js';
 const C = window.CATALOG;
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => new Intl.NumberFormat('vi-VN').format(n);
-const SLOT_ICON = { top: 'shirt', bottom: 'pants', shoes: 'shoe', cap: 'cap', face: 'glasses', head: 'crown', neck: 'scarf', back: 'wings' };
-const CLOSE_UP = new Set(['face', 'head', 'neck', 'cap']);
+const SLOT_ICON = { skin: 'users', face: 'glasses', head: 'crown', neck: 'scarf', back: 'wings' };
+const CLOSE_UP = new Set(['face', 'head', 'neck']);
 
 /** Nền CSS mô phỏng màu / hoạ tiết của món đồ để hiện trong ô lưới. */
 function swatchBg(it) {
@@ -23,10 +23,10 @@ function swatchBg(it) {
   }
 }
 
-export function createWalletUI({ send, toast, getIdToken, isAccount, onNeedLogin }) {
+export function createWalletUI({ send, toast, getIdToken, isAccount, onNeedLogin, getLook }) {
   let w = { coins: 0, owned: [], equip: {}, admin: false };
   let mode = 'shop';
-  let slot = 'top';
+  let slot = 'skin';
   let sel = null;
   let pendingBuy = null;
   const owns = (id) => w.admin || w.owned.includes(id);
@@ -167,7 +167,7 @@ export function createWalletUI({ send, toast, getIdToken, isAccount, onNeedLogin
   }
   function buildChar() {
     if (pv.ch || !characterReady()) return;
-    pv.ch = createCharacter();
+    pv.ch = createCharacter(getLook ? getLook() : null);
     pv.scene.add(pv.ch.group);
     applyTryOn();
   }
@@ -191,7 +191,7 @@ export function createWalletUI({ send, toast, getIdToken, isAccount, onNeedLogin
     const dt = Math.min(0.05, (t - (pv.last || t)) / 1000); pv.last = t;
     buildChar();
     const close = CLOSE_UP.has(slot);
-    const tz = close ? 2.3 : 5.2, ty = close ? 1.5 : 1.0, tl = close ? 1.5 : 0.95;
+    const tz = close ? 2.6 : 4.4, ty = close ? 1.25 : 0.95, tl = close ? 1.2 : 0.7;
     const k = 1 - Math.exp(-5 * dt);
     pv.camZ += (tz - pv.camZ) * k; pv.camY += (ty - pv.camY) * k; pv.ly += (tl - pv.ly) * k;
     pv.cam.position.set(0, pv.camY, pv.camZ);
@@ -256,7 +256,7 @@ export function createWalletUI({ send, toast, getIdToken, isAccount, onNeedLogin
       const worn = w.equip[it.slot] === it.id;
       b.className = 'fs-item' + (sel === it.id ? ' sel' : '') + (worn ? ' worn' : '');
       const state = owns(it.id) ? `<span class="own">${w.admin ? 'Miễn phí' : 'Đã sở hữu'}</span>` : `<span class="pr">${icon('coin')}${fmt(it.price)}</span>`;
-      b.innerHTML = `${worn ? '<span class="badge">ĐANG MẶC</span>' : ''}<div class="fs-sw" style="background:${swatchBg(it)}">${it.acc ? icon(SLOT_ICON[it.slot]) : ''}</div><b>${it.name}</b>${state}`;
+      b.innerHTML = `${worn ? '<span class="badge">ĐANG MẶC</span>' : ''}<div class="fs-sw" style="background:${it.img ? '#f3ead6' : swatchBg(it)}">${it.img ? `<img src="img/chars/${it.img}.png" alt="" style="width:100%;height:100%;object-fit:contain;image-rendering:auto">` : it.acc ? icon(SLOT_ICON[it.slot]) : ''}</div><b>${it.name}</b>${state}`;
       b.addEventListener('click', () => { sel = it.id; renderFashion(); applyTryOn(); });
       grid.appendChild(b);
     }

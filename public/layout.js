@@ -35,7 +35,15 @@
   const PLAYER_R = 0.2;
   const SEAT_R = 0.6;
 
-  const LOOK_COUNTS = { shirt: 10, skin: 6, hair: 6, hat: 6 };
+  // 13 nhân vật mặc định cho người chơi chọn (g: f = nữ, m = nam). Tên file: models/chars/character-<key>.glb
+  const CHARS = [
+    { key: 'female-a', g: 'f', name: 'Mai' }, { key: 'female-b', g: 'f', name: 'Linh' }, { key: 'female-c', g: 'f', name: 'Hà' },
+    { key: 'female-d', g: 'f', name: 'Trang' }, { key: 'female-e', g: 'f', name: 'Thảo' }, { key: 'female-f', g: 'f', name: 'Vy' },
+    { key: 'male-a', g: 'm', name: 'Minh' }, { key: 'male-b', g: 'm', name: 'Nam' }, { key: 'male-c', g: 'm', name: 'Khoa' },
+    { key: 'male-d', g: 'm', name: 'Huy' }, { key: 'male-e', g: 'm', name: 'Đức' }, { key: 'male-f', g: 'm', name: 'Bảo' },
+    { key: 'male-g', g: 'm', name: 'Long' },
+  ];
+  const LOOK_COUNTS = { shirt: 10, skin: 6, hair: 6, hat: 6, char: CHARS.length };
 
   const ROW_LETTERS = 'ABCDEFGHIJ';
 
@@ -219,20 +227,34 @@
     ROOM: { minX: -20, maxX: 20, minZ: -20, maxZ: 20, height: 30 },
     BOUNDS: { minX: -19.3, maxX: 19.3, minZ: -19.3, maxZ: 19.3 },
     SPAWN: { x: 0, z: 12 },
-    COLLIDERS: [{ x: 0, z: 0, r: 3.3 }],
+    COLLIDERS: [],
     INTERACT: [
       { id: 'door-cinema', type: 'door', go: 'cinema', x: 0, z: -16.2, r: 2.4, label: 'Vào Rạp Chiếu Phim' },
       { id: 'door-arcade', type: 'door', go: 'arcade', x: 16.2, z: 0, r: 2.4, label: 'Vào Khu Giải Trí' },
       { id: 'door-shop', type: 'door', go: 'shop', x: -16.2, z: 0, r: 2.4, label: 'Vào Shop Thời Trang' },
     ],
   };
-  PZ_DEF.BENCHES = [{ x: -8, z: 8 }, { x: 8, z: 8 }, { x: -8, z: -8 }, { x: 8, z: -8 }];
-  PZ_DEF.TREES = [{ x: -14, z: 12 }, { x: 14, z: 12 }, { x: -14, z: -12 }, { x: 14, z: -12 }, { x: -6, z: 16 }, { x: 6, z: 16 }];
-  PZ_DEF.BENCHES.forEach((b) => { for (const k of [-0.8, 0, 0.8]) PZ_DEF.COLLIDERS.push({ x: b.x + k, z: b.z, r: 0.5 }); });
-  PZ_DEF.TREES.forEach((t) => PZ_DEF.COLLIDERS.push({ x: t.x, z: t.z, r: 0.6 }));
+  // Đồ vật trong quảng trường (mô hình 3D Kenney, xem plaza3d.js). m = tên file .glb, s = tỉ lệ,
+  // r = bán kính va chạm (người chơi không đi xuyên được). Cả vẽ lẫn va chạm đều lấy từ danh sách này.
+  PZ_DEF.PROPS = [
+    { m: 'tree_fat', x: 0, z: 0, s: 6, r: 0.8 }, // cây lớn giữa quảng trường
+    { m: 'tree_oak', x: -14, z: 12, s: 4.2, r: 0.6 }, { m: 'tree_default', x: 14, z: 12, s: 4.2, r: 0.6 },
+    { m: 'tree_detailed', x: -14, z: -12, s: 4.2, r: 0.6 }, { m: 'tree_oak', x: 14, z: -12, s: 4.2, r: 0.6 },
+    { m: 'tree_fat', x: -6, z: 16, s: 4.2, r: 0.6 }, { m: 'tree_default', x: 6, z: 16, s: 4.2, r: 0.6 },
+    { m: 'tree_pineRoundA', x: -9, z: -14, s: 4.2, r: 0.6 }, { m: 'tree_pineRoundA', x: 9, z: -14, s: 4.2, r: 0.6 },
+    { m: 'light-curved', x: -12, z: 12, ry: Math.PI, s: 7, r: 0.4 }, { m: 'light-curved', x: 12, z: 12, ry: Math.PI, s: 7, r: 0.4 },
+    { m: 'light-curved', x: -12, z: -12, s: 7, r: 0.4 }, { m: 'light-curved', x: 12, z: -12, s: 7, r: 0.4 },
+    { m: 'light-curved', x: 0, z: 17, ry: Math.PI, s: 7, r: 0.4 }, { m: 'light-curved', x: -17, z: 17, ry: Math.PI, s: 7, r: 0.4 },
+    { m: 'light-curved', x: 17, z: 17, ry: Math.PI, s: 7, r: 0.4 },
+    { m: 'pot_large', x: -4.5, z: -15, s: 3, r: 0.9 }, { m: 'pot_large', x: 4.5, z: -15, s: 3, r: 0.9 },
+    { m: 'pot_large', x: -15, z: -4.5, s: 3, r: 0.9 }, { m: 'pot_large', x: -15, z: 4.5, s: 3, r: 0.9 },
+    { m: 'pot_large', x: 15, z: -4.5, s: 3, r: 0.9 }, { m: 'pot_large', x: 15, z: 4.5, s: 3, r: 0.9 },
+    { m: 'stone_largeA', x: -8, z: 8, ry: 0.6, s: 3.2, r: 1.5 }, { m: 'stone_largeA', x: 8, z: 8, ry: 2.2, s: 3.2, r: 1.5 },
+    { m: 'stone_largeA', x: -8, z: -8, ry: 1.4, s: 3.2, r: 1.5 }, { m: 'stone_largeA', x: 8, z: -8, ry: 3.4, s: 3.2, r: 1.5 },
+  ];
+  PZ_DEF.PROPS.forEach((o) => { if (o.r > 0) PZ_DEF.COLLIDERS.push({ x: o.x, z: o.z, r: o.r }); });
   const PZ = makeFlat(PZ_DEF);
-  PZ.BENCHES = PZ_DEF.BENCHES;
-  PZ.TREES = PZ_DEF.TREES;
+  PZ.PROPS = PZ_DEF.PROPS;
 
   // ---- Shop Thời Trang ----
   const SH_DEF = {
@@ -245,8 +267,8 @@
   SH_DEF.COUNTER = { x: 0, z: -6.6, w: 6, d: 1.2 };
   SH_DEF.OWNER = { x: 0, z: -8.1 };
   SH_DEF.RACKS = [];
-  for (const z of [-3.5, 0.5, 4.5]) { SH_DEF.RACKS.push({ x: -10.4, z, ry: Math.PI / 2 }); SH_DEF.RACKS.push({ x: 10.4, z, ry: -Math.PI / 2 }); }
-  SH_DEF.MANNEQUINS = [{ x: -5.2, z: -2.2 }, { x: -2.6, z: 1.4 }, { x: 2.6, z: 1.4 }, { x: 5.2, z: -2.2 }];
+  // (giá treo áo quần và ma-nơ-canh đã bỏ cùng hệ thống áo/quần cũ; shop sẽ được dựng lại bằng mô hình thật)
+  SH_DEF.MANNEQUINS = [];
   SH_DEF.MIRROR = { x: -7, z: -9.3 };
   for (const k of [-2.4, -1.2, 0, 1.2, 2.4]) SH_DEF.COLLIDERS.push({ x: SH_DEF.COUNTER.x + k, z: SH_DEF.COUNTER.z, r: 0.75 });
   SH_DEF.RACKS.forEach((r) => { for (const k of [-1.1, 0, 1.1]) SH_DEF.COLLIDERS.push({ x: r.x, z: r.z + k, r: 0.55 }); });
@@ -307,7 +329,7 @@
 
   return {
     ROOM, BOUNDS, ROWS, ROW_GAP, ROW0_Z, STEP_H, RAMP, SEAT_GAP, BLOCKS, ZA, ZB, TOP_Y,
-    SCREEN, PLAYER_R, SEAT_R, LOOK_COUNTS, SEATS, BEANBAGS, PROPS, OBSTACLES, COLLIDERS, SPAWN,
+    SCREEN, PLAYER_R, SEAT_R, LOOK_COUNTS, CHARS, SEATS, BEANBAGS, PROPS, OBSTACLES, COLLIDERS, SPAWN,
     clamp, heightAt, resolve, standPos,
     ROOMS, ROOM_BY_ID, DEFAULT_ROOM, INTERACT, DOOR_ARCADE, ARCADE: AR, PLAZA: PZ, SHOP: SH, layoutOf,
   };

@@ -7,7 +7,7 @@ import { initAuth } from './auth.js';
 import { createVoice } from './voice.js';
 import { buildPlaza, buildShop } from './town.js';
 import { createWalletUI } from './wallet-ui.js';
-import { loadOutfitMask } from './outfit.js';
+import { pickCharacter } from './pick.js';
 import { createGames } from './games.js';
 import { createTouch, isTouchDevice } from './touch.js';
 import { EMOTE_META, ICONS, icon, injectSprite } from './icons.js';
@@ -21,9 +21,9 @@ const store = {
 };
 
 const EMOTE_LIST = EMOTE_META;
-const mkAvatar = (lk) => (characterReady() ? createCharacter() : createAvatar(lk));
+const mkAvatar = (lk) => (characterReady() ? createCharacter(lk) : createAvatar(lk));
 let charState = 'loading';
-const charLoad = Promise.all([loadCharacter(), loadOutfitMask()]).then((r) => r[0]).then((ok) => { charState = ok ? 'ok' : 'fail'; return ok; });
+const charLoad = loadCharacter().then((ok) => { charState = ok ? 'ok' : 'fail'; return ok; });
 const TOUCH = isTouchDevice();
 let RL = L.layoutOf('plaza'); // bố cục của phòng hiện tại
 let curRoom = L.ROOM_BY_ID.plaza;
@@ -92,7 +92,7 @@ window.addEventListener('resize', resize);
 resize();
 
 // ====================== Màn hình chọn nhân vật ======================
-const look = Object.assign({ shirt: 5, skin: 0, hair: 1, hat: 0 }, store.get('look', {}));
+const look = Object.assign({ shirt: 5, skin: 0, hair: 1, hat: 0, char: 0 }, store.get('look', {}));
 const C = L.LOOK_COUNTS;
 for (const k of Object.keys(C)) if (!(look[k] >= 0 && look[k] < C[k])) look[k] = 0;
 $('nameInput').value = store.get('name', '');
@@ -286,6 +286,10 @@ function onMessage(m) {
         const p = peers.get(id);
         if (!p || p.isMe || p.seat !== null) continue;
         p.tx = x; p.tz = z; p.try_ = ry;
+        // bộ đệm ảnh chụp vị trí để nội suy mượt (xem updatePeers)
+        const buf = p.buf || (p.buf = []);
+        buf.push({ t: performance.now(), x, z, ry });
+        if (buf.length > 24) buf.shift();
       }
       return;
     }
@@ -294,7 +298,7 @@ function onMessage(m) {
       if (!p) return;
       for (const [s, id] of seatOwner) if (id === m.id) seatOwner.delete(s);
       seatOwner.set(m.seat, m.id);
-      p.seat = m.seat; p.tx = m.x; p.tz = m.z; p.try_ = m.ry;
+      p.seat = m.seat; p.tx = m.x; p.tz = m.z; p.try_ = m.ry; p.buf = null;
       if (p.isMe) {
         me.seat = m.seat; me.ry = m.ry; autoWalk = null;
         cam.lookYaw = 0; cam.lookPitch = 0.06;
@@ -307,7 +311,7 @@ function onMessage(m) {
       const p = peers.get(m.id);
       if (!p) return;
       for (const [s, id] of seatOwner) if (id === m.id) seatOwner.delete(s);
-      p.seat = null; p.tx = m.x; p.tz = m.z;
+      p.seat = null; p.tx = m.x; p.tz = m.z; p.buf = null;
       if (p.isMe) {
         me.seat = null; me.x = m.x; me.z = m.z;
         cam.yaw = me.ry + Math.PI;
@@ -808,7 +812,7 @@ const WELCOME = {
   shop: 'Chào mừng đến Shop Thời Trang! Lại gần quầy để mua đồ, lại gần gương để thử đồ.',
 };
 const wal = createWalletUI({
-  send, toast,
+  send, toast, getLook: () => look,
   getIdToken: () => auth.idToken(),
   isAccount: () => !!acct,
   onNeedLogin: () => { toast('Đang đưa bạn về màn hình đăng nhập…'); setTimeout(() => location.reload(), 700); },
@@ -1129,10 +1133,27 @@ function updateSelf(dt) {
   p.x = me.x; p.z = me.z; p.ry = me.ry;
   // gửi vị trí tối đa ~12 lần/giây khi có thay đổi
   const now = performance.now();
-  if (now - lastSent.t > 80 && (Math.abs(me.x - lastSent.x) > 0.01 || Math.abs(me.z - lastSent.z) > 0.01 || Math.abs(me.ry - lastSent.ry) > 0.03)) {
+  if (now - lastSent.t > 50 && (Math.abs(me.x - lastSent.x) > 0.01 || Math.abs(me.z - lastSent.z) > 0.01 || Math.abs(me.ry - lastSent.ry) > 0.03)) {
     send({ t: 'move', x: me.x, z: me.z, ry: me.ry });
     lastSent = { x: me.x, z: me.z, ry: me.ry, t: now };
   }
+}
+
+const INTERP_MS = 130;
+/** Lấy vị trí tại thời điểm t từ bộ đệm ảnh chụp (nội suy; nếu chưa có gói mới thì ngoại suy tối đa 120ms). */
+function sampleBuf(buf, t) {
+  while (buf.length > 2 && buf[1].t <= t) buf.shift();
+  const a = buf[0], b = buf[1];
+  if (!b) return a;
+  if (t <= a.t) return a;
+  if (t >= b.t) {
+    // chưa có gói mới hơn: tiếp tục theo vận tốc cũ một chút rồi dừng
+    const span = Math.max(b.t - a.t, 1), e = Math.min(t - b.t, 120);
+    return { x: b.x + ((b.x - a.x) / span) * e, z: b.z + ((b.z - a.z) / span) * e, ry: b.ry };
+  }
+  const u = (t - a.t) / (b.t - a.t);
+  const d = Math.atan2(Math.sin(b.ry - a.ry), Math.cos(b.ry - a.ry));
+  return { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u, ry: a.ry + d * u };
 }
 
 function updatePeers(dt, nowMs) {
@@ -1152,13 +1173,20 @@ function updatePeers(dt, nowMs) {
       moved = Math.hypot(p.x - ox, p.z - oz) / dt;
     } else {
       const ox = p.x, oz = p.z;
-      p.x += (p.tx - p.x) * kPos;
-      p.z += (p.tz - p.z) * kPos;
-      moved = Math.hypot(p.x - ox, p.z - oz) / dt;
-      let diff = p.try_ - p.ry;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      p.ry += diff * Math.min(1, dt * 12);
-      p.speed = moved;
+      const sm = p.buf && p.buf.length ? sampleBuf(p.buf, nowMs - INTERP_MS) : null;
+      if (sm) {
+        // nội suy giữa 2 ảnh chụp vị trí (trễ ~130ms): chuyển động đều, không giật dù mạng chập chờn
+        p.x = sm.x; p.z = sm.z;
+        p.ry += Math.atan2(Math.sin(sm.ry - p.ry), Math.cos(sm.ry - p.ry)) * Math.min(1, dt * 14);
+      } else {
+        p.x += (p.tx - p.x) * kPos;
+        p.z += (p.tz - p.z) * kPos;
+        let diff = p.try_ - p.ry;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        p.ry += diff * Math.min(1, dt * 12);
+      }
+      moved = Math.hypot(p.x - ox, p.z - oz) / Math.max(dt, 1e-3);
+      p.speed = p.speed + (moved - p.speed) * Math.min(1, dt * 12); // làm mượt tốc độ cho hoạt ảnh chân
     }
     if (p.isMe && seated) { me.x = p.x; me.z = p.z; p.ry = me.ry; }
     if (seated && !p.isMe) {
@@ -1374,11 +1402,30 @@ function enter(asAccount) {
     store.set('name', name);
   }
   me.name = name;
-  store.set('look', look);
   setEntering(true);
   setStatus(charState === 'loading' ? 'Đang tải nhân vật…' : 'Đang vào thế giới…');
-  charLoad.then(() => { setStatus('Đang vào thế giới…'); connect(); });
+  charLoad.then(async () => {
+    // lần đầu: cho người chơi chọn nhân vật nam / nữ
+    if (!store.get('charPicked', false) && characterReady()) {
+      const c = await pickCharacter(look.char);
+      look.char = c == null ? look.char : c;
+      store.set('charPicked', true);
+    }
+    store.set('look', look);
+    setStatus('Đang vào thế giới…');
+    connect();
+  });
 }
+// Đổi nhân vật khi đang chơi: chọn xong thì tải lại trang (đã đăng nhập thì vào lại nhanh)
+$('charBtn').addEventListener('click', async () => {
+  closePanel();
+  if (!characterReady()) return;
+  const c = await pickCharacter(look.char, { cancellable: true });
+  if (c == null || c === look.char) return;
+  look.char = c; store.set('look', look); store.set('charPicked', true);
+  toast('Đang đổi nhân vật…');
+  setTimeout(() => location.reload(), 500);
+});
 $('enterBtn').addEventListener('click', () => enter(!!acct));
 $('nameInput').addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') enter(!!acct); });
 for (const id of ['liEmail', 'liPass', 'rgName', 'rgEmail', 'rgPass', 'rgPass2']) $(id).addEventListener('keydown', (e) => e.stopPropagation());

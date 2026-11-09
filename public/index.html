@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="landing.css">
 <link rel="stylesheet" href="welcome.css">
+<link rel="stylesheet" href="pick.css">
 <script type="importmap">
 {
   "imports": {
@@ -116,6 +117,7 @@
     <button type="button" data-panel="emote" aria-label="Biểu cảm"><svg class="ic" viewBox="0 0 24 24"><use href="#i-smile"/></svg><span>Cảm xúc</span></button>
     <button type="button" data-panel="people" aria-label="Người trong phòng"><svg class="ic" viewBox="0 0 24 24"><use href="#i-users"/></svg><span>Mọi người</span></button>
     <span class="sep"></span>
+    <button type="button" id="charBtn" aria-label="Đổi nhân vật"><svg class="ic" viewBox="0 0 24 24"><use href="#i-users"/></svg><span>Nhân vật</span></button>
     <button type="button" id="wardBtn" aria-label="Tủ đồ"><svg class="ic" viewBox="0 0 24 24"><use href="#i-hanger"/></svg><span>Tủ đồ</span></button>
     <button type="button" id="topBtn" aria-label="Nạp xu"><svg class="ic" viewBox="0 0 24 24"><use href="#i-coin"/></svg><span>Nạp xu</span></button>
     <span class="sep"></span>
@@ -287,6 +289,19 @@
 
 <script src="layout.js"></script>
 <script src="catalog.js"></script>
+<!-- Chọn nhân vật (nam / nữ) -->
+<div id="pick" class="overlay pk" hidden>
+  <div class="pk-card" role="dialog" aria-label="Chọn nhân vật">
+    <h2>Chọn nhân vật của bạn</h2>
+    <p>Chọn bạn nam hoặc nữ, xoay để xem. Sau này vẫn đổi được trong game.</p>
+    <div class="pk-tabs" id="pkTabs"><button type="button" data-g="f" class="on">Nữ</button><button type="button" data-g="m">Nam</button></div>
+    <div class="pk-main">
+      <canvas id="pkCanvas" aria-label="Xem trước nhân vật"></canvas>
+      <div class="pk-grid" id="pkGrid"></div>
+    </div>
+    <div class="pk-foot"><button type="button" id="pkCancel" class="pk-ghost" hidden>Huỷ</button><button type="button" id="pkGo" class="pk-go">Chọn bạn này</button></div>
+  </div>
+</div>
 <script type="module" src="welcome.js"></script>
 <script type="module" src="main.js"></script>
 <noscript>Bạn cần bật JavaScript để chơi.</noscript>
