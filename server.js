@@ -49,6 +49,7 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
+  '.webp': 'image/webp',
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
@@ -528,7 +529,7 @@ function cleanLook(l) {
     return v >= 0 && v < max ? v : 0;
   };
   const C = L.LOOK_COUNTS;
-  return { shirt: pick(l.shirt, C.shirt), skin: pick(l.skin, C.skin), hair: pick(l.hair, C.hair), hat: pick(l.hat, C.hat) };
+  return { shirt: pick(l.shirt, C.shirt), skin: pick(l.skin, C.skin), hair: pick(l.hair, C.hair), hat: pick(l.hat, C.hat), char: pick(l.char, C.char) };
 }
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -867,7 +868,7 @@ function handle(c, msg) {
   }
 }
 
-// Gửi vị trí gộp 10 lần/giây cho từng phòng
+// Gửi vị trí gộp 20 lần/giây cho từng phòng
 setInterval(() => {
   for (const room of rooms.values()) {
     if (!room.dirty.size) continue;
@@ -879,7 +880,7 @@ setInterval(() => {
     room.dirty.clear();
     if (list.length) room.broadcast({ t: 's', p: list });
   }
-}, 100);
+}, 50);
 
 // Vật lý bóng đá: 25 lần/giây khi có người trong sân
 const BALL_DT = 0.04;
